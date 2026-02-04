@@ -23,3 +23,10 @@ services:
       KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092
       KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://localhost:9092
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+
+  redis:
+    image: redis:7.2-alpine
+    container_name: geopulse-redis
+    ports:
+      - "6380:6379"
+    command: redis-server --appendonly yes

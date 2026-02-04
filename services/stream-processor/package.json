@@ -8,13 +8,22 @@
     "dev": "ts-node src/index.ts",
     "dev:watch": "nodemon --exec ts-node src/index.ts"
   },
-  "keywords": ["kafka", "stream-processing", "event-driven", "geopulse", "state-machine"],
+  "keywords": [
+    "kafka",
+    "stream-processing",
+    "event-driven",
+    "geopulse",
+    "state-machine"
+  ],
   "author": "GeoPulse Team",
   "license": "MIT",
   "description": "GeoPulse Stream Processor - Derives operational states from sensor events using time-based windows and state machines",
   "dependencies": {
     "@types/node": "^25.2.0",
+    "@types/redis": "^4.0.10",
+    "dotenv": "^17.2.3",
     "kafkajs": "^2.2.4",
+    "redis": "^5.10.0",
     "typescript": "^5.9.3"
   },
   "devDependencies": {

@@ -58,14 +58,12 @@ export class LoadGenerator {
         return baseLoad;
       
       case 'spike':
-        // Create periodic spikes every 30 seconds
-        const spikeCycle = Math.floor(timestamp / 30000) % 2;
-        return spikeCycle === 0 ? baseLoad * this.SPIKE_MULTIPLIER : baseLoad;
+        // In spike scenario, significantly increase load for more transitions
+        return Math.min(1.0, baseLoad + 0.5); // Add 0.5 to base load to trigger transitions faster
       
       case 'drop':
-        // Create periodic drops every 45 seconds
-        const dropCycle = Math.floor(timestamp / 45000) % 2;
-        return dropCycle === 0 ? baseLoad * this.DROP_MULTIPLIER : baseLoad;
+        // In drop scenario, significantly decrease load for more transitions
+        return Math.max(0.0, baseLoad - 0.4); // Subtract 0.4 from base load to trigger transitions faster
       
       default:
         return baseLoad;

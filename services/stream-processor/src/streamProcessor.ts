@@ -2,6 +2,8 @@ import { SensorEvent, ZoneStateData, StateTransitionAlert, ZoneState } from './t
 import { TimeWindowManager } from './timeWindowManager';
 import { StateMachine } from './stateMachine';
 import { KafkaEventConsumer } from './kafkaConsumer';
+import { RedisClient } from './redisClient';
+import { RedisWriter } from './redisWriter';
 
 /**
  * Main stream processor that consumes events and derives operational states
@@ -9,7 +11,10 @@ import { KafkaEventConsumer } from './kafkaConsumer';
  */
 export class StreamProcessor {
   private consumer: KafkaEventConsumer;
+  private redisClient: RedisClient;
+  private redisWriter?: RedisWriter;
   private zoneStates: Map<string, ZoneStateData> = new Map<string, ZoneStateData>();
+  private zoneCoordinates: Map<string, { latitude: number; longitude: number }> = new Map();
   private eventCounter: number = 0;
   private transitionCounter: number = 0;
   private startTime: number = 0;
@@ -17,19 +22,24 @@ export class StreamProcessor {
 
   constructor() {
     this.consumer = new KafkaEventConsumer();
+    this.redisClient = new RedisClient();
   }
 
   /**
    * Initialize the processor
    */
   async initialize(): Promise<void> {
-    console.log('🚀 Initializing GeoPulse Stream Processor...');
+    console.log('Initializing GeoPulse Stream Processor...');
     
     // Connect to Kafka
     await this.consumer.connect();
     
+    // Connect to Redis
+    await this.redisClient.connect();
+    this.redisWriter = new RedisWriter(this.redisClient.getClient());
+    
     this.startTime = Date.now();
-    console.log('✅ Stream processor initialized and ready');
+    console.log('Stream processor initialized and ready');
   }
 
   /**
@@ -37,12 +47,12 @@ export class StreamProcessor {
    */
   async start(): Promise<void> {
     if (this.isRunning) {
-      console.log('⚠️ Processor is already running');
+      console.log('Processor is already running');
       return;
     }
 
     this.isRunning = true;
-    console.log('▶️ Starting stream processing...');
+    console.log('Starting stream processing...');
     
     // Start consuming events
     await this.consumer.startConsuming(this.handleEvent.bind(this));
@@ -69,17 +79,18 @@ export class StreamProcessor {
       return;
     }
 
-    console.log('⏹️ Stopping stream processor...');
+    console.log('Stopping stream processor...');
     this.isRunning = false;
     
     await this.consumer.disconnect();
+    await this.redisClient.disconnect();
     
     const duration = (Date.now() - this.startTime) / 1000;
-    console.log(`📈 Processing summary:`);
-    console.log(`   - Duration: ${duration.toFixed(1)} seconds`);
-    console.log(`   - Total events processed: ${this.eventCounter}`);
-    console.log(`   - State transitions: ${this.transitionCounter}`);
-    console.log(`   - Average rate: ${(this.eventCounter / duration).toFixed(1)} events/sec`);
+    console.log('Processing summary:');
+    console.log(`  - Duration: ${duration.toFixed(1)} seconds`);
+    console.log(`  - Total events processed: ${this.eventCounter}`);
+    console.log(`  - State transitions: ${this.transitionCounter}`);
+    console.log(`  - Average rate: ${(this.eventCounter / duration).toFixed(1)} events/sec`);
   }
 
   /**
@@ -87,6 +98,14 @@ export class StreamProcessor {
    */
   private async handleEvent(event: SensorEvent): Promise<void> {
     this.eventCounter++;
+    
+    // Store zone coordinates
+    if (!this.zoneCoordinates.has(event.zoneId)) {
+      this.zoneCoordinates.set(event.zoneId, {
+        latitude: event.latitude,
+        longitude: event.longitude
+      });
+    }
     
     // Get or create zone state
     let zoneState = this.zoneStates.get(event.zoneId);
@@ -127,6 +146,8 @@ export class StreamProcessor {
     );
 
     // Check if state changed and should trigger alert
+    const stateChanged = previousState !== nextState;
+    
     if (StateMachine.shouldAlert(
       previousState,
       nextState,
@@ -146,8 +167,21 @@ export class StreamProcessor {
       this.transitionCounter++;
     }
 
-    // Update state
+    // Update state first
     zoneState.currentState = nextState;
+
+    // Write to Redis when state changes
+    if (stateChanged && this.redisWriter) {
+      const coordinates = this.zoneCoordinates.get(event.zoneId);
+      if (coordinates) {
+        await this.redisWriter.writeZoneState(
+          event.zoneId,
+          zoneState,
+          coordinates.latitude,
+          coordinates.longitude
+        );
+      }
+    }
 
     // Log periodic updates
     if (this.eventCounter % 1000 === 0) {
