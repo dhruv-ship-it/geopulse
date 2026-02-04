@@ -1,0 +1,32 @@
+{
+  "name": "sensor-simulator",
+  "version": "1.0.0",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "dev": "ts-node src/index.ts",
+    "dev:watch": "nodemon --exec ts-node src/index.ts"
+  },
+  "keywords": [
+    "kafka",
+    "sensor",
+    "simulation",
+    "geopulse",
+    "event-driven"
+  ],
+  "author": "GeoPulse Team",
+  "license": "MIT",
+  "description": "GeoPulse Sensor Simulator - Generates deterministic geo-distributed sensor events for Kafka",
+  "dependencies": {
+    "@types/node": "^25.2.0",
+    "@types/uuid": "^9.0.8",
+    "kafkajs": "^2.2.4",
+    "typescript": "^5.9.3",
+    "uuid": "^9.0.1"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.11",
+    "ts-node": "^10.9.2"
+  }
+}
