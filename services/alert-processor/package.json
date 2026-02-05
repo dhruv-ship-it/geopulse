@@ -6,7 +6,9 @@
     "build": "tsc",
     "start": "node dist/index.js",
     "dev": "ts-node src/index.ts",
-    "dev:watch": "nodemon --exec ts-node src/index.ts"
+    "dev:watch": "nodemon --exec ts-node src/index.ts",
+    "test": "jest",
+    "test:watch": "jest --watch"
   },
   "keywords": [
     "kafka",
@@ -27,7 +29,10 @@
     "typescript": "^5.9.3"
   },
   "devDependencies": {
+    "@types/jest": "^29.5.12",
+    "jest": "^29.7.0",
     "nodemon": "^3.1.11",
+    "ts-jest": "^29.1.2",
     "ts-node": "^10.9.2"
   }
 }
