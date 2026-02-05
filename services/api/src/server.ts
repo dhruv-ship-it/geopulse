@@ -6,6 +6,7 @@ import { PostgresClient } from './postgresClient';
 import zonesRouter from './routes/zones';
 import alertsRouter from './routes/alerts';
 import analyticsRouter from './routes/analytics';
+import { register, httpRequestsTotal, httpRequestDurationMs } from './metrics';
 
 const PORT = process.env.PORT || 3000;
 const app: Application = express();
@@ -17,8 +18,41 @@ app.use(express.json());
 app.use((req, res, next) => {
   (req as any).id = require('crypto').randomUUID();
   logger.info({ requestId: (req as any).id, method: req.method, path: req.path }, 'Incoming request');
+  
+  // Start timing for request duration
+  (req as any).startTime = Date.now();
+  
+  // Hook into response finish to record metrics
+  res.on('finish', () => {
+    console.log(' METRICS FIRED:', req.method, req.path, res.statusCode);
+    const duration = Date.now() - (req as any).startTime;
+    const route = normalizeRoute(req.path);
+    
+    // Increment request counter
+    httpRequestsTotal.labels(req.method, route, res.statusCode.toString()).inc();
+    
+    // Observe request duration
+    httpRequestDurationMs.labels(req.method, route).observe(duration);
+    
+    console.log(' Metrics recorded:', { method: req.method, route, status: res.statusCode, duration });
+  });
+  
   next();
 });
+
+// Helper function to normalize routes
+function normalizeRoute(path: string): string {
+  if (path.startsWith('/zones/') && path !== '/zones') {
+    return '/zones/:zoneId';
+  }
+  if (path.startsWith('/alerts/') && path !== '/alerts') {
+    return '/alerts/:zoneId';
+  }
+  if (path.startsWith('/analytics/zones/') && path.includes('/alerts')) {
+    return '/analytics/zones/:zoneId/alerts';
+  }
+  return path;
+}
 
 // Redis client instance
 const redisClient = new RedisClient();
@@ -45,6 +79,12 @@ app.get('/health', (req, res) => {
     service: 'geopulse-api',
     timestamp: Date.now()
   });
+});
+
+// Metrics endpoint
+app.get('/metrics', async (req, res) => {
+  res.setHeader('Content-Type', register.contentType);
+  res.end(await register.metrics());
 });
 
 // 404 handler

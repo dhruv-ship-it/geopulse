@@ -6,6 +6,7 @@ import { RedisClient } from './redisClient';
 import { RedisWriter } from './redisWriter';
 import { KafkaAlertProducer, ZoneAlert } from './kafkaProducer';
 import { logger } from './logger';
+import { sensorEventsProcessedTotal, stateTransitionsTotal, alertsPublishedTotal, alertPublishLatencyMs } from './metrics';
 
 /**
  * Main stream processor that consumes events and derives operational states
@@ -106,6 +107,7 @@ export class StreamProcessor {
    */
   private async handleEvent(event: SensorEvent): Promise<void> {
     this.eventCounter++;
+    sensorEventsProcessedTotal.inc();
     
     // Store zone coordinates
     if (!this.zoneCoordinates.has(event.zoneId)) {
@@ -156,6 +158,11 @@ export class StreamProcessor {
     // Check if state changed and should trigger alert
     const stateChanged = previousState !== nextState;
     
+    // Increment state transition counter when state changes
+    if (stateChanged) {
+      stateTransitionsTotal.labels(previousState, nextState).inc();
+    }
+    
     if (StateMachine.shouldAlert(
       previousState,
       nextState,
@@ -175,7 +182,13 @@ export class StreamProcessor {
       // Publish to Kafka (zone.alerts) — only on actual state transitions
       try {
         if (this.alertProducer) {
+          const start = Date.now();
           await this.alertProducer.sendAlert(alert);
+          
+          // Observe latency and increment counter
+          alertPublishLatencyMs.observe(Date.now() - start);
+          alertsPublishedTotal.inc();
+          
           logger.info({ zoneId: alert.zoneId, previousState: alert.previousState, currentState: alert.currentState }, 'Published alert to Kafka');
         }
       } catch (err) {

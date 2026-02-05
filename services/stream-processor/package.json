@@ -26,6 +26,7 @@
     "dotenv": "^17.2.3",
     "kafkajs": "^2.2.4",
     "pino": "^9.0.0",
+    "prom-client": "^15.0.0",
     "redis": "^5.10.0",
     "typescript": "^5.9.3"
   },

@@ -31,7 +31,34 @@ sensor-simulator → Kafka (sensor.events) → stream-processor → Redis (zone 
 - Redis materialized state
 - Alert publishing and Redis persistence
 
-### Phase 5: PostgreSQL Analytics Layer (New)
+### Phase 6: Unit & Integration Testing (Complete)
+- Jest-based unit tests for StateMachine logic
+- Integration tests for Kafka → Redis alert flow
+- Deterministic tests without external dependencies
+
+### Phase 7: Observability with Prometheus (New)
+Adds Prometheus-compatible metrics to measure system behavior without affecting runtime logic.
+
+**Metrics Exposed:**
+- **Stream Processor** (Port 9090): `sensor_events_processed_total`, `state_transitions_total`, `alerts_published_total`, `alert_publish_latency_ms`
+- **Alert Processor** (Port 9091): `alerts_consumed_total`, `alerts_persisted_total{storage}`, `redis_alert_write_latency_ms`, `postgres_alert_write_latency_ms`
+- **API Service** (Port 3000): `http_requests_total{method,route,status}`, `http_request_duration_ms{method,route}`
+
+**How to Scrape:**
+```yaml
+scrape_configs:
+  - job_name: 'geopulse'
+    static_configs:
+      - targets: 
+        - 'localhost:9090'  # Stream Processor
+        - 'localhost:9091'  # Alert Processor
+        - 'localhost:3000'  # API Service
+```
+
+**Endpoint Access:**
+- Stream Processor: `curl http://localhost:9090/metrics`
+- Alert Processor: `curl http://localhost:9091/metrics`
+- API Service: `curl http://localhost:3000/metrics`
 Adds durable historical persistence and analytics.
 
 **What's New:**

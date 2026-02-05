@@ -1,9 +1,10 @@
 import 'dotenv/config';
 import { logger } from './logger';
 import { StreamProcessor } from './streamProcessor';
+import { register } from './metrics';
 
 /**
- * Main entry point for the stream processor
+ * Main entry point for stream processor
  */
 async function main(): Promise<void> {
   const processor = new StreamProcessor();
@@ -11,6 +12,22 @@ async function main(): Promise<void> {
   try {
     await processor.initialize();
     await processor.start();
+    
+    // Start metrics server
+    const metricsPort = parseInt(process.env.METRICS_PORT || '9090');
+    const metricsServer = require('http').createServer(async (req: any, res: any) => {
+      if (req.url === '/metrics') {
+        res.setHeader('Content-Type', register.contentType);
+        res.end(await register.metrics());
+      } else {
+        res.writeHead(404).end();
+      }
+    });
+    
+    metricsServer.listen(metricsPort, () => {
+      logger.info({ port: metricsPort }, 'Metrics server started');
+    });
+    
   } catch (error) {
     logger.fatal({ error }, 'Failed to start stream processor');
     process.exit(1);

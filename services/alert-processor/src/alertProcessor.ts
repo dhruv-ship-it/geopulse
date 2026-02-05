@@ -2,6 +2,7 @@ import { RedisClientType } from 'redis';
 import { ZoneAlert, ZoneAlertForZoneList } from './types';
 import { PostgresClient, ZoneAlertRow } from './postgresClient';
 import { logger } from './logger';
+import { alertsPersistedTotal, redisAlertWriteLatencyMs, postgresAlertWriteLatencyMs } from './metrics';
 
 const PER_ZONE_KEY_PREFIX = 'alerts:zone:';
 const GLOBAL_KEY = 'alerts:global';
@@ -34,6 +35,8 @@ export class AlertProcessor {
    */
   private async persistToRedis(alert: ZoneAlert): Promise<void> {
     try {
+      const start = Date.now();
+      
       const zoneKey = `${PER_ZONE_KEY_PREFIX}${alert.zoneId}`;
 
       const zoneEntry: ZoneAlertForZoneList = {
@@ -52,6 +55,10 @@ export class AlertProcessor {
       await this.redis.lPush(GLOBAL_KEY, JSON.stringify(alert));
       await this.redis.lTrim(GLOBAL_KEY, 0, GLOBAL_LIMIT - 1);
 
+      // Observe latency and increment counter
+      redisAlertWriteLatencyMs.observe(Date.now() - start);
+      alertsPersistedTotal.labels('redis').inc();
+
       logger.info({ zoneId: alert.zoneId, previousState: alert.previousState, currentState: alert.currentState, storage: 'redis' }, 'Alert persisted');
     } catch (err) {
       logger.error({ error: err, zoneId: alert.zoneId }, 'Failed to persist alert to Redis');
@@ -64,6 +71,8 @@ export class AlertProcessor {
    */
   private async persistToPostgres(alert: ZoneAlert): Promise<void> {
     try {
+      const start = Date.now();
+      
       const row: ZoneAlertRow = {
         zone_id: alert.zoneId,
         previous_state: alert.previousState,
@@ -74,6 +83,11 @@ export class AlertProcessor {
       };
 
       await this.postgres.insertAlert(row);
+      
+      // Observe latency and increment counter
+      postgresAlertWriteLatencyMs.observe(Date.now() - start);
+      alertsPersistedTotal.labels('postgres').inc();
+      
       logger.info({ zoneId: alert.zoneId, storage: 'postgres' }, 'Alert persisted');
     } catch (err) {
       logger.error({ error: err, zoneId: alert.zoneId }, 'Failed to persist alert to PostgreSQL');

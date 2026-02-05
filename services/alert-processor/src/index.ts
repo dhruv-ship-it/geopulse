@@ -4,6 +4,7 @@ import { KafkaAlertConsumer } from './kafkaConsumer';
 import { RedisClient } from './redisClient';
 import { PostgresClient } from './postgresClient';
 import { AlertProcessor } from './alertProcessor';
+import { register, alertsConsumedTotal } from './metrics';
 
 async function main(): Promise<void> {
   logger.info('Starting GeoPulse Alert Processor');
@@ -20,8 +21,26 @@ async function main(): Promise<void> {
     const alertProcessor = new AlertProcessor(redisClient.getClient(), postgresClient);
 
     await kafkaConsumer.startConsuming(async (alert) => {
+      // Increment alert consumption counter
+      alertsConsumedTotal.inc();
+      
       // As per Phase 4 rules: side-effect only, no business logic
       await alertProcessor.persistAlert(alert);
+    });
+
+    // Start metrics server
+    const metricsPort = parseInt(process.env.METRICS_PORT || '9091');
+    const metricsServer = require('http').createServer(async (req: any, res: any) => {
+      if (req.url === '/metrics') {
+        res.setHeader('Content-Type', register.contentType);
+        res.end(await register.metrics());
+      } else {
+        res.writeHead(404).end();
+      }
+    });
+    
+    metricsServer.listen(metricsPort, () => {
+      logger.info({ port: metricsPort }, 'Metrics server started');
     });
 
     // Graceful shutdown
