@@ -30,3 +30,19 @@ services:
     ports:
       - "6380:6379"
     command: redis-server --appendonly yes
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: geopulse-postgres
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_USER: geopulse
+      POSTGRES_PASSWORD: geopulse
+      POSTGRES_DB: geopulse
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ../services/alert-processor/migrations:/docker-entrypoint-initdb.d
+
+volumes:
+  postgres_data:

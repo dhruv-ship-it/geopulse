@@ -1,6 +1,7 @@
 import 'dotenv/config';
 import { KafkaAlertConsumer } from './kafkaConsumer';
 import { RedisClient } from './redisClient';
+import { PostgresClient } from './postgresClient';
 import { AlertProcessor } from './alertProcessor';
 
 async function main(): Promise<void> {
@@ -8,12 +9,14 @@ async function main(): Promise<void> {
 
   const kafkaConsumer = new KafkaAlertConsumer();
   const redisClient = new RedisClient();
+  const postgresClient = new PostgresClient();
 
   try {
     await kafkaConsumer.connect();
     await redisClient.connect();
+    await postgresClient.connect();
 
-    const alertProcessor = new AlertProcessor(redisClient.getClient());
+    const alertProcessor = new AlertProcessor(redisClient.getClient(), postgresClient);
 
     await kafkaConsumer.startConsuming(async (alert) => {
       // As per Phase 4 rules: side-effect only, no business logic
@@ -25,6 +28,7 @@ async function main(): Promise<void> {
       console.log('\n🛑 Received shutdown signal...');
       await kafkaConsumer.disconnect();
       await redisClient.disconnect();
+      await postgresClient.disconnect();
       process.exit(0);
     });
 
@@ -32,6 +36,7 @@ async function main(): Promise<void> {
       console.log('\n🛑 Received termination signal...');
       await kafkaConsumer.disconnect();
       await redisClient.disconnect();
+      await postgresClient.disconnect();
       process.exit(0);
     });
 

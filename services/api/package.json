@@ -13,7 +13,9 @@
   "license": "MIT",
   "description": "GeoPulse Read-Only API - Serves current zone state from Redis",
   "dependencies": {
+    "@types/pg": "^8.11.11",
     "express": "^4.18.2",
+    "pg": "^8.13.1",
     "redis": "^4.6.13"
   },
   "devDependencies": {

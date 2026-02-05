@@ -1,6 +1,10 @@
+import 'dotenv/config';
 import express, { Application } from 'express';
 import { RedisClient } from './redisClient';
+import { PostgresClient } from './postgresClient';
 import zonesRouter from './routes/zones';
+import alertsRouter from './routes/alerts';
+import analyticsRouter from './routes/analytics';
 
 const PORT = process.env.PORT || 3000;
 const app: Application = express();
@@ -11,16 +15,20 @@ app.use(express.json());
 // Redis client instance
 const redisClient = new RedisClient();
 
-// Middleware to attach Redis client to request
+// PostgreSQL client instance (Phase 5)
+const postgresClient = new PostgresClient();
+
+// Middleware to attach clients to request
 app.use((req, res, next) => {
   (req as any).redisClient = redisClient.getClient();
+  (req as any).postgresClient = postgresClient;
   next();
 });
 
 // Routes
 app.use('/zones', zonesRouter);
-import alertsRouter from './routes/alerts';
 app.use('/alerts', alertsRouter);
+app.use('/analytics', analyticsRouter);
 
 // Health check endpoint
 app.get('/health', (req, res) => {
@@ -54,6 +62,9 @@ async function startServer(): Promise<void> {
     // Connect to Redis
     await redisClient.connect();
     
+    // Connect to PostgreSQL (Phase 5)
+    await postgresClient.connect();
+    
     // Start server
     app.listen(PORT, () => {
       console.log(`GeoPulse API server listening on port ${PORT}`);
@@ -66,18 +77,24 @@ async function startServer(): Promise<void> {
       console.log(`  GET /alerts/:zoneId`);
       console.log(`  GET /alerts/recent?limit=20`);
       console.log(`  GET /alerts?state=CRITICAL`);
+      console.log(`Analytics endpoints (PostgreSQL-backed):`);
+      console.log(`  GET /analytics/zones/:zoneId/alerts?from=&to=`);
+      console.log(`  GET /analytics/alerts/recent?limit=50`);
+      console.log(`  GET /analytics/zones/top-critical?days=7`);
     });
     
     // Graceful shutdown
     process.on('SIGINT', async () => {
       console.log('\nReceived shutdown signal...');
       await redisClient.disconnect();
+      await postgresClient.disconnect();
       process.exit(0);
     });
     
     process.on('SIGTERM', async () => {
       console.log('\nReceived termination signal...');
       await redisClient.disconnect();
+      await postgresClient.disconnect();
       process.exit(0);
     });
     
