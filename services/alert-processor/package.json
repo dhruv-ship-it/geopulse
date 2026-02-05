@@ -1,0 +1,31 @@
+{
+  "name": "alert-processor",
+  "version": "1.0.0",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "dev": "ts-node src/index.ts",
+    "dev:watch": "nodemon --exec ts-node src/index.ts"
+  },
+  "keywords": [
+    "kafka",
+    "alerts",
+    "redis",
+    "geopulse"
+  ],
+  "author": "GeoPulse Team",
+  "license": "MIT",
+  "description": "GeoPulse Alert Processor - consumes zone.alerts and persists alert history in Redis",
+  "dependencies": {
+    "@types/node": "^25.2.0",
+    "dotenv": "^17.2.3",
+    "kafkajs": "^2.2.4",
+    "redis": "^5.10.0",
+    "typescript": "^5.9.3"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.11",
+    "ts-node": "^10.9.2"
+  }
+}

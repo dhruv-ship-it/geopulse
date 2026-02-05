@@ -4,6 +4,7 @@ import { StateMachine } from './stateMachine';
 import { KafkaEventConsumer } from './kafkaConsumer';
 import { RedisClient } from './redisClient';
 import { RedisWriter } from './redisWriter';
+import { KafkaAlertProducer, ZoneAlert } from './kafkaProducer';
 
 /**
  * Main stream processor that consumes events and derives operational states
@@ -13,6 +14,7 @@ export class StreamProcessor {
   private consumer: KafkaEventConsumer;
   private redisClient: RedisClient;
   private redisWriter?: RedisWriter;
+  private alertProducer?: KafkaAlertProducer;
   private zoneStates: Map<string, ZoneStateData> = new Map<string, ZoneStateData>();
   private zoneCoordinates: Map<string, { latitude: number; longitude: number }> = new Map();
   private eventCounter: number = 0;
@@ -23,6 +25,7 @@ export class StreamProcessor {
   constructor() {
     this.consumer = new KafkaEventConsumer();
     this.redisClient = new RedisClient();
+    // Note: alertProducer is initialized in initialize() to avoid async work in constructor
   }
 
   /**
@@ -33,6 +36,10 @@ export class StreamProcessor {
     
     // Connect to Kafka
     await this.consumer.connect();
+
+    // Initialize alert producer and connect
+    this.alertProducer = new KafkaAlertProducer();
+    await this.alertProducer.connect();
     
     // Connect to Redis
     await this.redisClient.connect();
@@ -83,6 +90,9 @@ export class StreamProcessor {
     this.isRunning = false;
     
     await this.consumer.disconnect();
+    if (this.alertProducer) {
+      await this.alertProducer.disconnect();
+    }
     await this.redisClient.disconnect();
     
     const duration = (Date.now() - this.startTime) / 1000;
@@ -154,6 +164,28 @@ export class StreamProcessor {
       zoneState.lastAlertTimestamp,
       event.eventTimestamp
     )) {
+      // Create alert object matching strict Phase 4 schema
+      const alert: ZoneAlert = {
+        zoneId: event.zoneId,
+        previousState,
+        currentState: nextState,
+        avg1m,
+        avg5m,
+        timestamp: event.eventTimestamp
+      };
+
+      // Publish to Kafka (zone.alerts) — only on actual state transitions
+      try {
+        if (this.alertProducer) {
+          await this.alertProducer.sendAlert(alert);
+          console.log(`📤 Published alert to Kafka: ${alert.zoneId} ${alert.previousState} → ${alert.currentState}`);
+        }
+      } catch (err) {
+        console.error('❌ Failed to publish alert to Kafka:', err);
+        // Per Phase 4 rules: do not add retries or alter state machine behavior
+      }
+
+      // Emit local log alert (unchanged behavior)
       this.emitAlert({
         zoneId: event.zoneId,
         previousState,

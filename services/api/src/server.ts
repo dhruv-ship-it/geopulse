@@ -19,6 +19,8 @@ app.use((req, res, next) => {
 
 // Routes
 app.use('/zones', zonesRouter);
+import alertsRouter from './routes/alerts';
+app.use('/alerts', alertsRouter);
 
 // Health check endpoint
 app.get('/health', (req, res) => {
@@ -60,6 +62,10 @@ async function startServer(): Promise<void> {
       console.log(`  GET /zones/:zoneId`);
       console.log(`  GET /zones?state=CRITICAL`);
       console.log(`  GET /zones/near?lat=0&lon=0&radiusKm=50`);
+      console.log(`Alert endpoints:`);
+      console.log(`  GET /alerts/:zoneId`);
+      console.log(`  GET /alerts/recent?limit=20`);
+      console.log(`  GET /alerts?state=CRITICAL`);
     });
     
     // Graceful shutdown
