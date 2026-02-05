@@ -1,4 +1,5 @@
 import 'dotenv/config';
+import { logger } from './logger';
 import { SensorSimulator } from './sensorSimulator';
 
 /**
@@ -11,20 +12,20 @@ async function main(): Promise<void> {
     await simulator.initialize();
     await simulator.start();
   } catch (error) {
-    console.error('❌ Failed to start simulator:', error);
+    logger.fatal({ error }, 'Failed to start simulator');
     process.exit(1);
   }
 }
 
 // Handle unhandled promise rejections
 process.on('unhandledRejection', (reason, promise) => {
-  console.error('Unhandled Rejection at:', promise, 'reason:', reason);
+  logger.fatal({ reason, promise }, 'Unhandled Rejection');
   process.exit(1);
 });
 
 // Handle uncaught exceptions
 process.on('uncaughtException', (error) => {
-  console.error('Uncaught Exception:', error);
+  logger.fatal({ error }, 'Uncaught Exception');
   process.exit(1);
 });
 

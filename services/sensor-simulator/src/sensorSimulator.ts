@@ -3,6 +3,7 @@ import { LoadGenerator } from './loadGenerator';
 import { KafkaEventProducer } from './kafkaProducer';
 import { loadConfig } from './config';
 import { ZoneConfig, SensorEvent } from './types';
+import { logger } from './logger';
 
 /**
  * Main sensor simulator orchestrator
@@ -24,20 +25,17 @@ export class SensorSimulator {
    * Initialize the simulator
    */
   async initialize(): Promise<void> {
-    console.log('🚀 Initializing GeoPulse Sensor Simulator...');
-    console.log(`📊 Configuration: ${this.config.numberOfZones} zones, ${this.config.eventsPerSecond} events/sec`);
-    console.log(`🎭 Scenario: ${this.config.scenario}`);
-    console.log(`📝 Logging every ${this.config.logEveryNEvents} events`);
+    logger.info({ numberOfZones: this.config.numberOfZones, eventsPerSecond: this.config.eventsPerSecond, scenario: this.config.scenario, logEveryNEvents: this.config.logEveryNEvents }, 'Initializing GeoPulse Sensor Simulator');
 
     // Generate zones
     this.zones = ZoneGenerator.generateZones(this.config.numberOfZones);
-    console.log(`📍 Generated ${this.zones.length} zones with geographic distribution`);
+    logger.info({ zoneCount: this.zones.length }, 'Generated zones with geographic distribution');
 
     // Connect to Kafka
     await this.kafkaProducer.connect();
     
     this.startTime = Date.now();
-    console.log('✅ Simulator initialized and ready');
+    logger.info('Simulator initialized and ready');
   }
 
   /**
@@ -45,12 +43,12 @@ export class SensorSimulator {
    */
   async start(): Promise<void> {
     if (this.isRunning) {
-      console.log('⚠️ Simulator is already running');
+      logger.warn('Simulator is already running');
       return;
     }
 
     this.isRunning = true;
-    console.log('▶️ Starting sensor simulation...');
+    logger.info('Starting sensor simulation');
     
     // Calculate interval based on events per second
     const intervalMs = 1000 / this.config.eventsPerSecond;
@@ -67,13 +65,13 @@ export class SensorSimulator {
 
     // Handle graceful shutdown
     process.on('SIGINT', async () => {
-      console.log('\n🛑 Received shutdown signal...');
+      logger.info('Received shutdown signal');
       await this.stop();
       process.exit(0);
     });
 
     process.on('SIGTERM', async () => {
-      console.log('\n🛑 Received termination signal...');
+      logger.info('Received termination signal');
       await this.stop();
       process.exit(0);
     });
@@ -87,16 +85,14 @@ export class SensorSimulator {
       return;
     }
 
-    console.log('⏹️ Stopping sensor simulation...');
+    logger.info('Stopping sensor simulation');
     this.isRunning = false;
     
     await this.kafkaProducer.disconnect();
     
     const duration = (Date.now() - this.startTime) / 1000;
-    console.log(`📈 Simulation summary:`);
-    console.log(`   - Duration: ${duration.toFixed(1)} seconds`);
-    console.log(`   - Total events: ${this.eventCounter}`);
-    console.log(`   - Average rate: ${(this.eventCounter / duration).toFixed(1)} events/sec`);
+    const rate = this.eventCounter / duration;
+    logger.info({ duration, totalEvents: this.eventCounter, averageRate: rate }, 'Simulation summary');
   }
 
   /**
@@ -122,7 +118,7 @@ export class SensorSimulator {
         this.logProgress(events[0]);
       }
     } catch (error) {
-      console.error('❌ Error sending events:', error);
+      logger.error({ error }, 'Error sending events');
     }
   }
 
@@ -133,7 +129,7 @@ export class SensorSimulator {
     const duration = (Date.now() - this.startTime) / 1000;
     const rate = (this.eventCounter / duration).toFixed(1);
     
-    console.log(`📊 Progress: ${this.eventCounter} events | ${rate} events/sec | Zone ${sampleEvent.zoneId} load: ${sampleEvent.load}`);
+    logger.info({ eventCount: this.eventCounter, rate, zoneId: sampleEvent.zoneId, load: sampleEvent.load }, 'Simulation progress');
     
     // Log zone distribution info periodically
     if (this.eventCounter % (this.config.logEveryNEvents * 10) === 0) {
@@ -145,12 +141,13 @@ export class SensorSimulator {
    * Log summary of zone configurations
    */
   private logZoneSummary(): void {
-    console.log('🌍 Zone Summary:');
-    this.zones.slice(0, 5).forEach(zone => {
-      console.log(`   ${zone.zoneId}: (${zone.latitude.toFixed(2)}, ${zone.longitude.toFixed(2)}) base=${zone.baseLoad.toFixed(2)}`);
-    });
-    if (this.zones.length > 5) {
-      console.log(`   ... and ${this.zones.length - 5} more zones`);
-    }
+    const zoneSummaries = this.zones.slice(0, 5).map(zone => ({
+      zoneId: zone.zoneId,
+      latitude: zone.latitude.toFixed(2),
+      longitude: zone.longitude.toFixed(2),
+      baseLoad: zone.baseLoad.toFixed(2)
+    }));
+    
+    logger.info({ zones: zoneSummaries, totalZones: this.zones.length }, 'Zone summary');
   }
 }

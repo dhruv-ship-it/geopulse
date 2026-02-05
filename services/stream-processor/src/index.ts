@@ -1,4 +1,5 @@
 import 'dotenv/config';
+import { logger } from './logger';
 import { StreamProcessor } from './streamProcessor';
 
 /**
@@ -11,20 +12,20 @@ async function main(): Promise<void> {
     await processor.initialize();
     await processor.start();
   } catch (error) {
-    console.error('❌ Failed to start stream processor:', error);
+    logger.fatal({ error }, 'Failed to start stream processor');
     process.exit(1);
   }
 }
 
 // Handle unhandled promise rejections
 process.on('unhandledRejection', (reason, promise) => {
-  console.error('Unhandled Rejection at:', promise, 'reason:', reason);
+  logger.fatal({ reason, promise }, 'Unhandled Rejection');
   process.exit(1);
 });
 
 // Handle uncaught exceptions
 process.on('uncaughtException', (error) => {
-  console.error('Uncaught Exception:', error);
+  logger.fatal({ error }, 'Uncaught Exception');
   process.exit(1);
 });
 

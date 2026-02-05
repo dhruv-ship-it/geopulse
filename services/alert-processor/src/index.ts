@@ -1,11 +1,12 @@
 import 'dotenv/config';
+import { logger } from './logger';
 import { KafkaAlertConsumer } from './kafkaConsumer';
 import { RedisClient } from './redisClient';
 import { PostgresClient } from './postgresClient';
 import { AlertProcessor } from './alertProcessor';
 
 async function main(): Promise<void> {
-  console.log('🚀 Starting GeoPulse Alert Processor...');
+  logger.info('Starting GeoPulse Alert Processor');
 
   const kafkaConsumer = new KafkaAlertConsumer();
   const redisClient = new RedisClient();
@@ -25,7 +26,7 @@ async function main(): Promise<void> {
 
     // Graceful shutdown
     process.on('SIGINT', async () => {
-      console.log('\n🛑 Received shutdown signal...');
+      logger.info('Received shutdown signal');
       await kafkaConsumer.disconnect();
       await redisClient.disconnect();
       await postgresClient.disconnect();
@@ -33,7 +34,7 @@ async function main(): Promise<void> {
     });
 
     process.on('SIGTERM', async () => {
-      console.log('\n🛑 Received termination signal...');
+      logger.info('Received termination signal');
       await kafkaConsumer.disconnect();
       await redisClient.disconnect();
       await postgresClient.disconnect();
@@ -41,20 +42,20 @@ async function main(): Promise<void> {
     });
 
   } catch (err) {
-    console.error('❌ Alert processor failed to start:', err);
+    logger.fatal({ error: err }, 'Alert processor failed to start');
     process.exit(1);
   }
 }
 
 // Handle unhandled rejections
 process.on('unhandledRejection', (reason, promise) => {
-  console.error('Unhandled Rejection at:', promise, 'reason:', reason);
+  logger.fatal({ reason, promise }, 'Unhandled Rejection');
   process.exit(1);
 });
 
 // Handle uncaught exceptions
 process.on('uncaughtException', (err) => {
-  console.error('Uncaught Exception:', err);
+  logger.fatal({ error: err }, 'Uncaught Exception');
   process.exit(1);
 });
 

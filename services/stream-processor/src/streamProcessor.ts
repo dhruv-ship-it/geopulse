@@ -5,6 +5,7 @@ import { KafkaEventConsumer } from './kafkaConsumer';
 import { RedisClient } from './redisClient';
 import { RedisWriter } from './redisWriter';
 import { KafkaAlertProducer, ZoneAlert } from './kafkaProducer';
+import { logger } from './logger';
 
 /**
  * Main stream processor that consumes events and derives operational states
@@ -32,7 +33,7 @@ export class StreamProcessor {
    * Initialize the processor
    */
   async initialize(): Promise<void> {
-    console.log('Initializing GeoPulse Stream Processor...');
+    logger.info('Initializing GeoPulse Stream Processor');
     
     // Connect to Kafka
     await this.consumer.connect();
@@ -46,7 +47,7 @@ export class StreamProcessor {
     this.redisWriter = new RedisWriter(this.redisClient.getClient());
     
     this.startTime = Date.now();
-    console.log('Stream processor initialized and ready');
+    logger.info('Stream processor initialized and ready');
   }
 
   /**
@@ -54,25 +55,25 @@ export class StreamProcessor {
    */
   async start(): Promise<void> {
     if (this.isRunning) {
-      console.log('Processor is already running');
+      logger.warn('Processor is already running');
       return;
     }
 
     this.isRunning = true;
-    console.log('Starting stream processing...');
+    logger.info('Starting stream processing');
     
     // Start consuming events
     await this.consumer.startConsuming(this.handleEvent.bind(this));
 
     // Handle graceful shutdown
     process.on('SIGINT', async () => {
-      console.log('\n🛑 Received shutdown signal...');
+      logger.info('Received shutdown signal');
       await this.stop();
       process.exit(0);
     });
 
     process.on('SIGTERM', async () => {
-      console.log('\n🛑 Received termination signal...');
+      logger.info('Received termination signal');
       await this.stop();
       process.exit(0);
     });
@@ -86,7 +87,7 @@ export class StreamProcessor {
       return;
     }
 
-    console.log('Stopping stream processor...');
+    logger.info('Stopping stream processor');
     this.isRunning = false;
     
     await this.consumer.disconnect();
@@ -96,11 +97,8 @@ export class StreamProcessor {
     await this.redisClient.disconnect();
     
     const duration = (Date.now() - this.startTime) / 1000;
-    console.log('Processing summary:');
-    console.log(`  - Duration: ${duration.toFixed(1)} seconds`);
-    console.log(`  - Total events processed: ${this.eventCounter}`);
-    console.log(`  - State transitions: ${this.transitionCounter}`);
-    console.log(`  - Average rate: ${(this.eventCounter / duration).toFixed(1)} events/sec`);
+    const rate = this.eventCounter / duration;
+    logger.info({ duration, totalEvents: this.eventCounter, stateTransitions: this.transitionCounter, averageRate: rate }, 'Processing summary');
   }
 
   /**
@@ -178,10 +176,10 @@ export class StreamProcessor {
       try {
         if (this.alertProducer) {
           await this.alertProducer.sendAlert(alert);
-          console.log(`📤 Published alert to Kafka: ${alert.zoneId} ${alert.previousState} → ${alert.currentState}`);
+          logger.info({ zoneId: alert.zoneId, previousState: alert.previousState, currentState: alert.currentState }, 'Published alert to Kafka');
         }
       } catch (err) {
-        console.error('❌ Failed to publish alert to Kafka:', err);
+        logger.error({ error: err }, 'Failed to publish alert to Kafka');
         // Per Phase 4 rules: do not add retries or alter state machine behavior
       }
 
@@ -239,9 +237,7 @@ export class StreamProcessor {
    * Emit state transition alert
    */
   private emitAlert(alert: StateTransitionAlert): void {
-    console.log('🚨 STATE TRANSITION ALERT 🚨');
-    console.log(JSON.stringify(alert, null, 2));
-    console.log('─'.repeat(50));
+    logger.warn(alert, 'State transition alert');
   }
 
   /**
@@ -250,9 +246,9 @@ export class StreamProcessor {
   private logProgress(event: SensorEvent, avg1m: number, avg5m: number): void {
     const duration = (Date.now() - this.startTime) / 1000;
     const rate = (this.eventCounter / duration).toFixed(1);
+    const currentState = this.zoneStates.get(event.zoneId)?.currentState;
     
-    console.log(`📊 Progress: ${this.eventCounter} events | ${rate} events/sec`);
-    console.log(`   Zone ${event.zoneId}: load=${event.load.toFixed(3)}, avg1m=${avg1m.toFixed(3)}, avg5m=${avg5m.toFixed(3)}, state=${this.zoneStates.get(event.zoneId)?.currentState}`);
+    logger.info({ eventCount: this.eventCounter, rate, zoneId: event.zoneId, load: event.load, avg1m, avg5m, currentState }, 'Processing progress');
     
     // Log zone state summary
     if (this.eventCounter % 5000 === 0) {
@@ -264,11 +260,17 @@ export class StreamProcessor {
    * Log summary of all zone states
    */
   private logZoneSummary(): void {
-    console.log('🌍 Zone State Summary:');
-    for (const [zoneId, stateData] of this.zoneStates.entries()) {
+    const zoneSummaries = Array.from(this.zoneStates.entries()).map(([zoneId, stateData]) => {
       const avg1m = TimeWindowManager.calculateAverage(stateData.window1m);
       const avg5m = TimeWindowManager.calculateAverage(stateData.window5m);
-      console.log(`   ${zoneId}: ${stateData.currentState} (1m:${avg1m.toFixed(3)}, 5m:${avg5m.toFixed(3)})`);
-    }
+      return {
+        zoneId,
+        currentState: stateData.currentState,
+        avg1m: avg1m.toFixed(3),
+        avg5m: avg5m.toFixed(3)
+      };
+    });
+    
+    logger.info({ zones: zoneSummaries }, 'Zone state summary');
   }
 }

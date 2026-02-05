@@ -1,6 +1,7 @@
 import { RedisClientType } from 'redis';
 import { ZoneAlert, ZoneAlertForZoneList } from './types';
 import { PostgresClient, ZoneAlertRow } from './postgresClient';
+import { logger } from './logger';
 
 const PER_ZONE_KEY_PREFIX = 'alerts:zone:';
 const GLOBAL_KEY = 'alerts:global';
@@ -51,9 +52,9 @@ export class AlertProcessor {
       await this.redis.lPush(GLOBAL_KEY, JSON.stringify(alert));
       await this.redis.lTrim(GLOBAL_KEY, 0, GLOBAL_LIMIT - 1);
 
-      console.log(`✅ Persisted alert to Redis for ${alert.zoneId} (prev=${alert.previousState} -> cur=${alert.currentState})`);
+      logger.info({ zoneId: alert.zoneId, previousState: alert.previousState, currentState: alert.currentState, storage: 'redis' }, 'Alert persisted');
     } catch (err) {
-      console.error('❌ Failed to persist alert to Redis:', err);
+      logger.error({ error: err, zoneId: alert.zoneId }, 'Failed to persist alert to Redis');
       // Log error but don't throw - Redis is best-effort for recent alerts
     }
   }
@@ -73,9 +74,9 @@ export class AlertProcessor {
       };
 
       await this.postgres.insertAlert(row);
-      console.log(`✅ Persisted alert to PostgreSQL for ${alert.zoneId}`);
+      logger.info({ zoneId: alert.zoneId, storage: 'postgres' }, 'Alert persisted');
     } catch (err) {
-      console.error('❌ Failed to persist alert to PostgreSQL:', err);
+      logger.error({ error: err, zoneId: alert.zoneId }, 'Failed to persist alert to PostgreSQL');
       throw err; // Fail loudly for PostgreSQL - this is for compliance/audit
     }
   }
