@@ -5,8 +5,15 @@ module.exports = {
   roots: ['<rootDir>/src'],
   testMatch: ['**/__tests__/**/*.test.ts'],
   collectCoverageFrom: [
-    'src/**/*.ts',
-    '!src/index.ts',
-    '!src/**/*.d.ts',
+    'src/stateMachine.ts',
+    'src/timeWindowManager.ts'
   ],
+  coverageThreshold: {
+    global: {
+      branches: 80,
+      functions: 85,
+      lines: 85,
+      statements: 85
+    }
+  }
 };
