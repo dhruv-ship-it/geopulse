@@ -200,8 +200,7 @@ Commit incrementally. Update docs/STATUS.md: close D8, unblock WP2, note the new
 
 **Manual afterwards** — this is a verification gate:
 ```bash
-docker volume rm infra_postgres_data     # 21 rows of February data; drop before any measured run
-cd infra && docker-compose up -d
+cd infra && docker-compose up -d        # redis 6390 (password), postgres 5434
 cd tools/kafka-bootstrap && npm run bootstrap
 
 # run the pipeline and confirm it now actually transitions
@@ -211,6 +210,12 @@ cd services/sensor-simulator && SCENARIO=spike SPEED_MULTIPLIER=60 npm run dev  
 **You must see state transitions within a minute or two of wall clock.** S1's run produced zero
 over 120 seconds — that is the symptom D8 caused, and it is the thing this session has to reverse.
 If you still see none, stop and diagnose; do not proceed to S2b.
+
+**Status: gate passed during S2a.** All ten zones reached `STRESSED` roughly 2.5 seconds after the
+simulator started, within a 17 ms spread of event time; 19 alert rows reached Postgres through
+password-authenticated Redis. `zone_alerts` was already empty, so no volume drop was needed.
+Ports: Redis 6380 → **6390** with `--requirepass`, Postgres 5432 → **5434** (5433 is taken by
+another project as well).
 
 ---
 

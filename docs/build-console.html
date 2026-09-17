@@ -239,7 +239,7 @@ code,pre,.mono{font-family:"IBM Plex Mono",ui-monospace,Menlo,Consolas,monospace
 @media(prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
 </style>
 
-<script id="app-state" type="application/json">{"done":["S1"]}</script>
+<script id="app-state" type="application/json">{"done":["S1","S2a"]}</script>
 
 <div class="wrap">
   <header class="masthead">
@@ -382,8 +382,8 @@ Then, infra hardening (small, but it must land before any measured run):
   the resolved host:port at startup so the connection target is visible.
 
 Commit incrementally. Update docs/STATUS.md: close D8, unblock WP2, note the new ports.`,
-m:`<p><span class="flag">Verification gate — do not start S2b until this passes</span></p>
-<pre>docker volume rm infra_postgres_data   # 21 rows of February data
+m:`<p><span class="flag">Verification gate — passed during S2a itself; re-run it if you touch the clock</span></p>
+<pre># redis is now on 6390 with a password, postgres on 5434 (5433 was taken too)
 cd infra &amp;&amp; docker-compose up -d
 cd tools/kafka-bootstrap &amp;&amp; npm run bootstrap
 
@@ -391,7 +391,8 @@ cd tools/kafka-bootstrap &amp;&amp; npm run bootstrap
 cd services/stream-processor &amp;&amp; npm run dev
 # terminal 2
 cd services/sensor-simulator &amp;&amp; SCENARIO=spike SPEED_MULTIPLIER=60 npm run dev</pre>
-<p>You <strong>must</strong> see state transitions within a minute or two of wall clock. S1's run produced <strong>zero</strong> over 120 seconds with avg5m ≈ 0.9 against a 0.75 threshold — that is the symptom D8 caused, and reversing it is this session's whole job.</p>`},
+<p>You <strong>must</strong> see state transitions within a minute or two of wall clock. S1's run produced <strong>zero</strong> over 120 seconds with avg5m ≈ 0.9 against a 0.75 threshold — that is the symptom D8 caused, and reversing it was this session's whole job.</p>
+<p><strong>Result:</strong> all ten zones reached STRESSED about 2.5 s after the simulator started, within a 17 ms spread of event time. <code>zone_alerts</code> was already empty, so no volume drop was needed.</p>`},
 
 {id:"S2b",wp:"WP6a",t:"Simulator ground truth",est:"45–60m",stage:0,
 p:`Read docs/STATUS.md, then docs/03-MEASUREMENT.md, then docs/02-PHASE-1-CORRELATION.md WP6a.
