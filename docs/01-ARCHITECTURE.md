@@ -85,8 +85,9 @@ is bounded by latency rather than by CPU.
 
 These are real bugs found by reading the code. Fixing them is work package **WP0**.
 
-**Status after WP0: D1, D2, D4, D5, D7 closed. D3, D6 open as planned. D8 is NEW, found during
-live verification, and it BLOCKS WP2 — read §3.2 before starting WP1.**
+**Status after WP0: D1, D2, D4, D5, D7 closed. D3, D6 open as planned. D8 was found during WP0's
+live verification and closed in S2a (WP6a) — §3.2 records what it was, how it was fixed, and the
+before/after measurement. WP2 is no longer blocked.**
 
 | # | Defect | Location | Why it matters |
 |---|---|---|---|
@@ -96,10 +97,10 @@ live verification, and it BLOCKS WP2 — read §3.2 before starting WP1.**
 | D4 ✅ | **Test coverage claim is hollow.** `jest.config.js` scopes `collectCoverageFrom` to exactly two files. Worse, `alert-processor/src/__tests__/alertFlow.int.test.ts` declares a *stub* `AlertProcessor` class inside the test file and tests that instead of the real implementation — the alert-processor lcov report reads `LH:0` (zero lines hit) for every source file. | `*/jest.config.js`, `alert-processor/src/__tests__/` | The current resume bullet claims 90%+ coverage. It is technically scoped to "core stream-processing logic" so it is not a lie, but it collapses under one follow-up question. |
 | D5 ✅ | **Unbounded zone state map.** `stream-processor` keeps `zoneStates` and `zoneCoordinates` maps that only ever grow. No eviction for zones that stop reporting. | `stream-processor/src/streamProcessor.ts` L20-21 | Memory leak at scale; relevant once we run 10k-zone benchmarks. |
 | D6 ⬜ | **Zookeeper-mode Kafka.** `confluentinc/cp-zookeeper` + ZK-coordinated broker. Zookeeper was removed entirely in Kafka 4.0; KRaft is the current standard. | `infra/docker-compose.yml` | Not urgent, but know the answer. Cheap to migrate and a good talking point. |
-| D8 ⛔ | **Simulator event clock does not track real time, and every zone's clock runs at a different rate.** Event time advances by a per-event constant, not by elapsed time, so it runs at 0.5–10% of wall clock and zones diverge 20× from each other. | `sensor-simulator/src/loadGenerator.ts` | **Blocks WP2.** Adjacent zones can never appear to degrade "at the same time", which is the entire premise of spatial correlation. See §3.2. |
+| D8 ✅ | **Simulator event clock did not track real time, and every zone's clock ran at a different rate.** Event time advanced by a per-event constant, not by elapsed time, so it ran at 0.5–10% of wall clock and zones diverged 20× from each other. | `sensor-simulator/src/loadGenerator.ts` | Blocked WP2: adjacent zones could never appear to degrade "at the same time", which is the entire premise of spatial correlation. Closed in S2a by a shared virtual clock — see §3.2 and `docs/adr/ADR-005-simulated-event-time.md`. |
 | D7 ✅ | **Simulator load depends on the host timezone.** `LoadGenerator.addRealisticVariation` read the time-of-day pattern with `Date#getHours()`, which is host-local. The same event timestamp produced a different load in a different timezone, or either side of a DST change. | `sensor-simulator/src/loadGenerator.ts` | Found while writing the WP0 determinism tests. Directly breaks the "simulator is deterministic" property that replay and every measured number rest on. Now `getUTCHours()`. |
 
-### 3.2 D8 — the simulator's event clock does not track real time (BLOCKS WP2)
+### 3.2 D8 — the simulator's event clock did not track real time (CLOSED in S2a)
 
 Found by running the full pipeline against the live stack during WP0 verification: a 120-second
 run at the default settings, with `avg5m ≈ 0.9` on every zone against a `0.75` threshold,
@@ -137,11 +138,37 @@ Two consequences, and the second is the serious one:
    window"*. Against this simulator that judgement can never be true, so the correlation engine
    would correctly report no incidents and the eval harness would score it at zero recall.
 
-**This must be fixed before WP2 is testable, and before WP6a generates any ground truth.** It is
-not a WP0 defect and was deliberately not fixed there — the event-time model is a design decision
-that WP6a owns. The likely shape of the fix: derive `eventTimestamp` from `producedAt` minus a
-bounded per-zone lag (so the clock tracks real time and lateness is a small offset), rather than
-accumulating a per-event delay. That also gives D3's watermarking something coherent to watch.
+#### The fix (S2a)
+
+A single `VirtualClock`, shared by every zone, in which simulated time is a pure function of the
+tick count: `now() = SIM_START_EPOCH_MS + ticks × SIM_STEP_MS`. No wall-clock read, no
+accumulation, no per-zone state — zones cannot drift by construction. Per-zone sensor lag stays,
+because out-of-order arrival across zones is realistic and the consumer should face it, but as a
+**bounded offset** (`eventTime = clock.now() − lagMs(zoneId)`, lag in [0, 20] ms, hashed from the
+zone id) rather than a rate. `producedAt` comes from the same clock, so the whole record is
+reproducible.
+
+`SPEED_MULTIPLIER` then buys what the old model could not offer at all: simulated time per real
+second, independent of the content of the run. A 60x run emits exactly the same events with
+exactly the same timestamps as a 1x run, in a sixtieth of the wall clock. The rationale, the
+alternatives rejected and the costs are in `docs/adr/ADR-005-simulated-event-time.md`.
+
+Measured after the fix (`benchmarks/results/d8-simulator-event-clock-after.txt`, same 20 zones
+and same 60-second window as the before run):
+
+| | Before | After |
+|---|---|---|
+| Event-time rate | 0.50%–9.97% of real time | exactly 1.000× at `SPEED_MULTIPLIER=1` |
+| Divergence between zones after 60s | 5681 ms, growing without bound | 0 ms |
+| Zone-to-zone spread at one instant | unbounded | ≤ 20 ms, constant for the life of the run |
+| Wall-clock cost of a 60s confirmation window | ~200 minutes at the slowest zone | 60 s at 1x, 1 s at 60x |
+
+Live against the full stack at 60x: all ten zones reached `STRESSED` within a **17 ms** spread of
+event time, about 2.5 seconds after the simulator started. The same pipeline produced zero
+transitions in 120 seconds before the fix.
+
+One useful side effect: lateness is now bounded at 20 ms **by construction**, so D3's watermark
+has an exact allowed-lateness to use rather than a guessed one.
 
 ### 3.1 How each closed defect was closed (WP0)
 
