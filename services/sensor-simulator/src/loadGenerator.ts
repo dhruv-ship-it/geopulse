@@ -14,6 +14,15 @@ export class LoadGenerator {
    * Generate a sensor event with realistic load value
    */
   private static zoneClocks = new Map<string, number>();
+
+  /**
+   * Clear the per-zone event clocks. The clocks are process-global mutable state, so a test
+   * (or a fresh replay) must be able to start from a known point.
+   */
+  static reset(): void {
+    this.zoneClocks.clear();
+  }
+
   
   static generateEvent(
     zone: ZoneConfig,
@@ -87,8 +96,12 @@ export class LoadGenerator {
     // Generate deterministic pseudo-random value
     const randomFactor = this.pseudoRandom(combinedSeed);
     
-    // Add time-of-day variation (simulate daily patterns)
-    const hourOfDay = new Date(timestamp).getHours();
+    // Add time-of-day variation (simulate daily patterns).
+    // UTC, not local time: getHours() reads the host timezone, so the same event timestamp
+    // would produce a different load on a machine in a different timezone — or on the same
+    // machine either side of a DST change. Determinism is load-bearing for replay and for
+    // every measurement taken against this simulator.
+    const hourOfDay = new Date(timestamp).getUTCHours();
     const dailyPattern = this.getDailyPattern(hourOfDay);
     
     // Add some noise for realism
