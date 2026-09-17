@@ -69,6 +69,34 @@ export class KafkaEventProducer {
   }
 
   /**
+   * RECORD TIMESTAMP — deliberately not set. This is defect D10, and it destroyed every event
+   * the simulator produced.
+   *
+   * These messages used to carry `timestamp: event.eventTimestamp`, which reads as the obviously
+   * right thing to do for an event-time pipeline. It is not, and the reason is worth knowing.
+   *
+   * A Kafka record timestamp is not application event time. It is the field the broker uses to
+   * decide how old a segment is, and therefore when to delete it. Simulated event time sits at a
+   * fixed epoch in the past (2026-01-15, so runs stay comparable — ADR-005), the broker's clock
+   * says today, and the topic ran CreateTime with 7-day retention. Every message was therefore
+   * born 245 days past its retention deadline, and the broker deleted each segment seconds after
+   * it rolled:
+   *
+   *   Deleting segment LogSegment(baseOffset=0, largestRecordTimestamp=Some(1768486940992))
+   *   due to log retention time 604800000ms breach based on the largest record timestamp
+   *
+   * 5.76M events were produced, and vanished underneath the consumer while it was still reading
+   * them. Evidence: `benchmarks/results/d10-root-cause.txt`.
+   *
+   * Event time still travels in the payload, as `eventTimestamp`, which is the only place the
+   * stream processor has ever read it from. Nothing loses information; the storage layer just
+   * stops being told a lie about how old its data is. The topics also now pin
+   * `message.timestamp.type=LogAppendTime` (tools/kafka-bootstrap), so the broker stamps arrival
+   * time whatever a producer claims — this comment is the explanation, that config is the
+   * guarantee. Reasoning in `docs/adr/ADR-007-record-timestamp-vs-event-time.md`.
+   */
+
+  /**
    * Send sensor event to Kafka
    * Uses zoneId as message key for partitioning
    */
@@ -82,8 +110,8 @@ export class KafkaEventProducer {
       messages: [
         {
           key: event.zoneId, // Partition by zoneId
-          value: JSON.stringify(event),
-          timestamp: event.eventTimestamp.toString()
+          value: JSON.stringify(event)
+          // No `timestamp` — see the note on RECORD TIMESTAMP below.
         }
       ]
     };
@@ -125,8 +153,7 @@ export class KafkaEventProducer {
           topic: KAFKA_TOPIC,
           messages: zoneEvents.map(event => ({
             key: event.zoneId,
-            value: JSON.stringify(event),
-            timestamp: event.eventTimestamp.toString()
+            value: JSON.stringify(event)
           }))
         };
 
