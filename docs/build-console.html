@@ -446,6 +446,17 @@ Finish the pipeline end to end:
 - Containerise all services and extend infra/docker-compose.yml so the whole stack comes up with
   one command, not just infra.
 
+Carried over from WP0 (deliberately deferred to this session, do not skip):
+- stream-processor/src/kafkaConsumer.ts still has the D1 bug — its eachMessage wraps everything
+  in try/catch and logs, so a failed event is silently dropped and the offset commits. Reuse
+  alert-processor's processWithRecovery rather than writing a second implementation; extract it
+  to somewhere both services import. Decide and document whether a dropped sensor event deserves
+  the same retry-then-DLQ treatment as a dropped alert, or a cheaper policy — they are not
+  obviously the same stakes, and the reasoning belongs in ADR-000 as an amendment.
+- The DLQ topic is named zone.degradations.dlq while alert-processor still consumes zone.alerts.
+  That mismatch resolves itself once this session does the rename; make sure it actually lines up
+  rather than leaving two differently-named topic families.
+
 Then run the full stack against SCENARIO=regional-anomaly and confirm one injected regional
 anomaly produces exactly one incident. Fix what that reveals.
 

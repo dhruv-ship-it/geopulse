@@ -287,6 +287,17 @@ Finish the pipeline end to end:
 - Containerise all services and extend infra/docker-compose.yml so the whole stack comes up with
   one command, not just infra.
 
+Carried over from WP0 (deliberately deferred to this session, do not skip):
+- stream-processor/src/kafkaConsumer.ts still has the D1 bug — its eachMessage wraps everything
+  in try/catch and logs, so a failed event is silently dropped and the offset commits. Reuse
+  alert-processor's processWithRecovery rather than writing a second implementation; extract it
+  to somewhere both services import. Decide and document whether a dropped sensor event deserves
+  the same retry-then-DLQ treatment as a dropped alert, or a cheaper policy — they are not
+  obviously the same stakes, and the reasoning belongs in ADR-000 as an amendment.
+- The DLQ topic is named zone.degradations.dlq while alert-processor still consumes zone.alerts.
+  That mismatch resolves itself once this session does the rename; make sure it actually lines up
+  rather than leaving two differently-named topic families.
+
 Then run the full stack against SCENARIO=regional-anomaly and confirm one injected regional
 anomaly produces exactly one incident. Fix what that reveals.
 
@@ -494,3 +505,25 @@ Everything here is yours, not an agent's:
 4. **A bad measured number is worth more than a good invented one.** If the eval comes back ugly,
    that is the project working — record it, diagnose it, fix it, and you have an interview story
    nobody else has.
+
+---
+
+## 8. Verification gates
+
+Some sessions produce work that cannot be verified inside the session — typically because the
+infrastructure was not running. That work is **not done**; it is *written*. The distinction
+matters, because an unverified fix that silently does not work will be discovered at the worst
+possible moment, during an end-to-end debug session where three layers are suspect at once.
+
+**Rule: when a session ends owing verification, run it before starting the next session.**
+
+Each such debt is recorded in `STATUS.md` under a "verification owed" heading with the exact
+commands. If verification fails, do not carry on to the next work package — open a session with
+the repair prompt in §5 instead.
+
+| Gate | After | Why it cannot wait |
+|---|---|---|
+| Topic partition counts | S1 | Every scaling claim and every throughput benchmark rests on real partitions. Pre-existing topics auto-created with 1 partition are *not* resized by `createTopics` — they must be deleted first. |
+| Integration suite green | S1 | The D1 retry/DLQ path is only covered by the gated integration test; unit coverage of the wiring is 0%. Until it runs, "alerts are never silently lost" is a claim about code that has never executed. |
+| One incident, not hundreds | S7 | The entire thesis. If this is wrong, everything measured afterwards is measuring the wrong thing. |
+| Eval agrees with the live API | S11 | Two implementations of the headline metric that disagree means one is wrong, and it must not be the one on the resume. |
