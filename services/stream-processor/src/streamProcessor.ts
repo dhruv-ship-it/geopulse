@@ -109,12 +109,22 @@ export class StreamProcessor {
     this.eventCounter++;
     sensorEventsProcessedTotal.inc();
     
-    // Store zone coordinates
-    if (!this.zoneCoordinates.has(event.zoneId)) {
-      this.zoneCoordinates.set(event.zoneId, {
-        latitude: event.latitude,
-        longitude: event.longitude
-      });
+    // First sighting of a zone: publish it to the Redis zone registry. This is separate
+    // from the state write below because the state write only fires on a transition, and
+    // the correlation engine needs the location and H3 cells of every zone — including the
+    // ones that never leave NORMAL.
+    if (!this.zoneCoordinates.has(event.zoneId) && this.redisWriter) {
+      try {
+        await this.redisWriter.registerZone(event.zoneId, event.latitude, event.longitude);
+        this.zoneCoordinates.set(event.zoneId, {
+          latitude: event.latitude,
+          longitude: event.longitude
+        });
+      } catch (err) {
+        // Leave the zone unregistered so the next event retries. Processing continues:
+        // windowing does not depend on Redis.
+        logger.error({ error: err, zoneId: event.zoneId }, 'Failed to register zone');
+      }
     }
     
     // Get or create zone state
@@ -221,7 +231,8 @@ export class StreamProcessor {
           event.zoneId,
           zoneState,
           coordinates.latitude,
-          coordinates.longitude
+          coordinates.longitude,
+          event.eventTimestamp
         );
       }
     }
