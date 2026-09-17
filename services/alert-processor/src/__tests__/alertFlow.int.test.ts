@@ -23,7 +23,8 @@ const describeIntegration = RUN ? describe : describe.skip;
 
 const KAFKA_BROKER = process.env.KAFKA_BROKER || 'localhost:9092';
 const REDIS_HOST = process.env.REDIS_HOST || 'localhost';
-const REDIS_PORT = process.env.REDIS_PORT || '6380';
+const REDIS_PORT = process.env.REDIS_PORT || '6390';
+const REDIS_PASSWORD = process.env.REDIS_PASSWORD || 'geopulse-dev';
 const ALERTS_TOPIC = 'zone.alerts';
 const DLQ_TOPIC = 'zone.degradations.dlq';
 const GLOBAL_KEY = 'alerts:global';
@@ -60,7 +61,10 @@ describeIntegration('alert flow (integration)', () => {
   const zoneId = `Z-${(Date.now() % 100000000).toString().padStart(8, '0')}`;
 
   beforeAll(async () => {
-    redis = createClient({ url: `redis://${REDIS_HOST}:${REDIS_PORT}` }) as RedisClientType;
+    redis = createClient({
+      url: `redis://${REDIS_HOST}:${REDIS_PORT}`,
+      password: REDIS_PASSWORD
+    }) as RedisClientType;
     await redis.connect();
 
     postgres = new PostgresClient();

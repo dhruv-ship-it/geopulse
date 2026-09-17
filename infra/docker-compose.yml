@@ -28,14 +28,19 @@ services:
     image: redis:7.2-alpine
     container_name: geopulse-redis
     ports:
-      - "6380:6379"
-    command: redis-server --appendonly yes
+      # 6390, not the 6380 this project used to ask for: an unrelated project's Redis owns 6380
+      # on the dev machine. Moving the port alone would only relocate the collision, so the
+      # password below is the actual guard — a service that reaches the wrong Redis now fails
+      # AUTH instead of silently reading and writing another project's data.
+      - "6390:6379"
+    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD:-geopulse-dev}
 
   postgres:
     image: postgres:16-alpine
     container_name: geopulse-postgres
     ports:
-      - "5432:5432"
+      # 5433 for the same reason as Redis above: 5432 is taken by another project locally.
+      - "5433:5432"
     environment:
       POSTGRES_USER: geopulse
       POSTGRES_PASSWORD: geopulse

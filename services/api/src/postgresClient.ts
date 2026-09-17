@@ -2,7 +2,9 @@ import { Client, ClientConfig } from 'pg';
 
 const DB_CONFIG: ClientConfig = {
   host: process.env.POSTGRES_HOST || 'localhost',
-  port: parseInt(process.env.POSTGRES_PORT || '5432', 10),
+  // 5433, not 5432: another project's Postgres owns the default port on the dev machine, and a
+  // service that connects to the wrong database is worse than one that fails to start.
+  port: parseInt(process.env.POSTGRES_PORT || '5433', 10),
   database: process.env.POSTGRES_DB || 'geopulse',
   user: process.env.POSTGRES_USER || 'geopulse',
   password: process.env.POSTGRES_PASSWORD || 'geopulse',
@@ -27,6 +29,9 @@ export class PostgresClient {
   private isConnected: boolean = false;
 
   constructor() {
+    console.log(
+      `Postgres target: ${DB_CONFIG.host}:${DB_CONFIG.port}/${DB_CONFIG.database} as ${DB_CONFIG.user}`
+    );
     this.client = new Client(DB_CONFIG);
   }
 
