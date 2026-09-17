@@ -10,10 +10,10 @@
 | Field | Value |
 |---|---|
 | **Phase** | Phase 1 — Spatiotemporal Incident Correlation |
-| **Active work package** | S2a done — D8 closed and the simulator event clock rebuilt. WP1 and WP2 are both open. |
+| **Active work package** | S2b done — **WP6a complete**. WP1 and WP2 are both open. |
 | **Last updated** | 2026-09-17 |
-| **Last commit at time of writing** | `aceb776` |
-| **Blocked on** | Nothing. **D8 is closed, so WP2 is unblocked.** |
+| **Last commit at time of writing** | `f668f08` |
+| **Blocked on** | Nothing for WP1/WP2. **WP6b is blocked by D10** — the live pipeline emits zero degradations, so there would be nothing to score. |
 
 **Decisions locked in (do not re-litigate without the owner):**
 - Scope is idea ① (spatial correlation) only. Ideas ②–⑤ are deferred to `06-FUTURE-PHASES.md`.
@@ -34,8 +34,8 @@
 | WP3 | `correlation-engine` service | ☐ Not started | |
 | WP4 | Propagation vector | ☐ Not started | |
 | WP5 | API + live map UI | ☐ Not started | |
-| WP6a | Simulator ground truth | ◐ In progress | The event-time model landed in S2a (virtual clock, D8 closed, ADR-005). The anomaly-injection scenarios and ground-truth emission are still to do — that is S2b. |
-| WP6b | Eval harness + benchmarks | ☐ Not started | |
+| WP6a | Simulator ground truth | ☑ Done | All four scenarios inject, all four emit §2-schema labels, determinism asserted byte-for-byte, labels verified against the real state machine. ADR-006. Understanding checkpoint still owed. |
+| WP6b | Eval harness + benchmarks | ☐ Not started | **Blocked by D10.** |
 | WP7 | Docs, ADRs, README, resume | ☐ Not started | |
 
 Status legend: ☐ not started · ◐ in progress · ☑ done (acceptance criteria met) · ⚠ done but
@@ -55,6 +55,7 @@ truly complete when both are ticked.
 | WP2 | ☐ | |
 | WP3 | ☐ | |
 | WP4 | ☐ | |
+| WP6a | ☐ — questions at the end of the S2b log entry | |
 
 ---
 
@@ -68,6 +69,7 @@ truly complete when both are ticked.
 | ADR-003 | Incident identity, merge and split semantics | ☐ Not written |
 | ADR-004 | Partitioning on coarse H3 cells | ☐ Not written |
 | ADR-005 | Simulated event time: virtual clock, bounded lag, speed multiplier | ☑ Written (S2a) |
+| ADR-006 | Ground truth by construction: one severity function, two thresholds | ☑ Written (S2b) |
 
 ---
 
@@ -84,6 +86,12 @@ truly complete when both are ticked.
 | Simulator event-time rate | 1.000× real time | 20 zones, `SIM_STEP_MS=1000`, `SPEED_MULTIPLIER=1` | `benchmarks/results/d8-simulator-event-clock-after.txt` | 2026-09-17 |
 | Zone-to-zone event-time divergence | 0 ms over 60 s (spread bounded at ≤ 20 ms) | as above; was 5681 ms before the fix | `benchmarks/results/d8-simulator-event-clock-after.txt` | 2026-09-17 |
 | Wall clock per 60 s confirmation window | 60.00 s at 1×, 1.00 s at 60× | as above | `benchmarks/results/d8-simulator-event-clock-after.txt` | 2026-09-17 |
+| Zone nearest-neighbour, median — global spiral | 6222 km @ 10 zones, 305 km @ 5000 | fibonacci spiral, seed 42 | `benchmarks/results/d9-zone-spacing.txt` | 2026-09-17 |
+| Zone nearest-neighbour, median — regional grid | 33.6 km @ 100, 15.7 km @ 400, 4.1 km @ 5000 | 400 km region, seed 42 | `benchmarks/results/d9-zone-spacing.txt` | 2026-09-17 |
+| Zone pairs within an H3 res-5 ring — global spiral | 0, at every zone count measured | 25 km reach | `benchmarks/results/d9-zone-spacing.txt` | 2026-09-17 |
+| Zones labelled per anomaly, reference config | 62 regional, 57 propagating, 43 multi, 16 noise | 400 zones, seed 42, 4 simulated hours | `evals/groundtruth/*-seed42.meta.json` | 2026-09-17 |
+| Labelled zones reaching STRESSED in the real state machine | 100% (62/62, 57/57, 43/43, 16/16); 0 of 40 unlabelled controls | ordered per-zone replay, same config | `benchmarks/results/wp6a-degradation-check.txt` | 2026-09-17 |
+| Detection floor, labelled onset to STRESSED (median) | 256 s regional, 291 s propagating | as above; 5 min window fill + 60 s confirmation | `benchmarks/results/wp6a-degradation-check.txt` | 2026-09-17 |
 
 Re-run with `./benchmarks/run-coverage.sh`. These are low and they are honest — the previous
 "90%+" figure was scoped to two hand-picked files. **Do not put a coverage number on the resume**
@@ -104,6 +112,8 @@ Tracked from `01-ARCHITECTURE.md` §3.
 | D5 | Unbounded zone state maps | ☑ Closed — `f2ace62` |
 | D6 | Zookeeper-mode Kafka (KRaft is current) | ☐ Open (Phase 6) |
 | D7 | Simulator load depends on host timezone (`getHours()` not `getUTCHours()`) | ☑ Closed — `7fa7e0a`. **New**, found while writing the determinism tests. |
+| D9 | Zones too far apart to have neighbours — the global spiral puts the closest pair 160 km apart at 5000 zones, with zero pairs inside an H3 res-5 ring at any count | ☑ Closed — S2b. `regional-grid` layout; evidence `benchmarks/results/d9-zone-spacing.txt`, see `01-ARCHITECTURE.md` §3.3. |
+| D10 | Live pipeline emits zero degradations from 5.76M events that provably should degrade; zones left at `avg5m = 0` | ☐ **Open — blocks WP6b.** Events proven fine by ordered replay; the consumption path is at fault, mechanism not yet established. See `01-ARCHITECTURE.md` §3.4. |
 | D8 | Simulator event clock runs at 0.5–10% of real time and each zone's clock runs at a different rate (20× spread in 60s) | ☑ Closed — S2a. One shared virtual clock; per-zone lag is now a bounded offset. Before/after: `benchmarks/results/d8-simulator-event-clock.txt` vs `-after.txt`; rationale in `docs/adr/ADR-005-simulated-event-time.md`. |
 
 ---
@@ -111,6 +121,67 @@ Tracked from `01-ARCHITECTURE.md` §3.
 ## Session log
 
 Append one entry per working session. Newest at the top. Keep to 2–4 lines.
+
+### 2026-09-17 — S2b: WP6a (anomaly scenarios + ground truth)
+
+- **WP6a done.** All four scenarios from `03-MEASUREMENT.md` §2.1 inject faults and emit labels
+  to `evals/groundtruth/<run-id>.jsonl` in the §2 schema: `regional-anomaly`,
+  `propagating-anomaly`, `multi-anomaly` (two disjoint faults, catches over-grouping) and
+  `noise` (16 isolated single-zone bursts, catches hallucinated incidents; the correct answer
+  there is zero incidents).
+- **The design point.** One severity function, called by both the event generator and the label
+  deriver, on the same tick grid, at the same instants the events are stamped with. The labels
+  cannot drift from the stream because there is no second implementation for them to drift from.
+  Written up in `docs/adr/ADR-006-ground-truth-by-construction.md`.
+- **Found and fixed a bias in my own labels.** Onset was recorded when severity crossed the
+  membership cut, which on a 120-second ramp is ~12 s after the zone's load has already crossed
+  the degradation threshold — so every time-to-detect would have been reported 12 s faster than
+  it was. Membership and onset are now separate thresholds; onset is pinned to the earliest
+  instant the load *could* have crossed, so the residual error is conservative, never flattering.
+  The deriver also now refuses to emit a label whose peak severity falls between the two.
+- **Found D9, closed it.** The fibonacci-spiral zone layout put the closest pair of zones 160 km
+  apart at 5000 zones, with **zero** pairs inside an H3 res-5 neighbour ring at any zone count.
+  A regional anomaly would have covered one zone and the collapse ratio would have been zero
+  regardless of what WP1/WP2 did — the engine would have measured as broken while being correct.
+  New `regional-grid` layout; anomaly scenarios default to it. Base loads are drawn i.i.d. there
+  rather than by `index % 7`, which on a grid lays down diagonal stripes of spatially correlated
+  baseline load — exactly the structure the engine is supposed to find only when an anomaly put
+  it there.
+- **Determinism asserted byte-for-byte**, across zone placement, the anomaly plan, the event
+  stream and the ground-truth file — and the mirror image too, that a different seed gives a
+  different run, since a builder that ignored its seed would pass every reproducibility check.
+  The run id is derived from the simulated epoch, scenario and seed rather than the wall clock:
+  it is embedded in every record, so a wall-clock id would make every record non-deterministic.
+- **Labels verified against the real state machine**, not only against the simulator's own idea
+  of a degrading load. Ordered replay through the stream-processor's `TimeWindowManager` and
+  `StateMachine`: 62/62, 57/57, 43/43, 16/16 labelled zones reach STRESSED; 0 of 40 unlabelled
+  controls transition. Median detection lag 256 s — the documented floor, not a defect.
+- **Found D10, open, blocks WP6b.** A live 400-zone run put 5.76M events through the stack —
+  lag 0 on every partition, all 400 zones registered — and produced **zero** degradations, with
+  every zone left at `avg5m = 0`. The ordered replay proves the events are fine, so the fault is
+  in the consumption path. The obvious suspect is watermark-driven eviction under cross-partition
+  skew, and eviction does happen (7,230 evictions at 20 min of skew) — but it was tested and does
+  not account for the symptom, because an evicted zone refills its window within five simulated
+  minutes and still crosses the threshold. Recorded as a lead, not a diagnosis.
+- **Next:** **D10 first** — WP6b cannot produce a meaningful number until it is fixed, and it is
+  cheap to get wrong quietly. Then WP1 (spatial layer), which is unblocked and now has a zone
+  field dense enough to test against. Owner still owes the WP0 understanding checkpoint.
+
+#### WP6a understanding checkpoint — questions owed
+
+Answer these without looking at the code:
+
+1. Why is the ground truth derived from the same function the generator uses, rather than
+   observed from the emitted stream? What specifically would go wrong with the observed version?
+2. Why are there two severity thresholds rather than one? Which metric would be wrong with one,
+   and in which direction?
+3. Why is the radial profile floored instead of falling smoothly to zero at the rim? What does
+   that cost, and why is the cost worth paying?
+4. Why do `multi-anomaly` and `noise` exist? Name the specific failure each catches, and say what
+   a suite without them would report for a system that merged the whole map into one incident.
+5. Why is the run id not a wall-clock timestamp?
+6. What is the detection floor, where does it come from, and why would a *faster* measured TTD be
+   a reason for suspicion rather than celebration?
 
 ### 2026-09-17 — S2a: D8 (simulator event clock) + infra hardening
 - **D8 closed.** Replaced the per-zone event-time accumulator with one `VirtualClock` shared by
