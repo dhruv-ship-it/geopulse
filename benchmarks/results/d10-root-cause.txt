@@ -1,0 +1,52 @@
+GeoPulse diagnosis: D10 root cause
+generated: 2026-09-17T17:29:31Z
+commit:    8872eb8
+
+QUESTION: why did a 400-zone regional-anomaly run emit zero degradations?
+
+--- 1. The topic is empty. Earliest offset == latest offset on every partition. ---
+earliest  raw.zone.events:0:463482
+earliest  raw.zone.events:1:374400
+earliest  raw.zone.events:2:460800
+earliest  raw.zone.events:3:397341
+earliest  raw.zone.events:4:699741
+earliest  raw.zone.events:5:526941
+earliest  raw.zone.events:6:325341
+earliest  raw.zone.events:7:564282
+earliest  raw.zone.events:8:518400
+earliest  raw.zone.events:9:555741
+earliest  raw.zone.events:10:526941
+earliest  raw.zone.events:11:432000
+
+latest    raw.zone.events:0:463482
+latest    raw.zone.events:1:374400
+latest    raw.zone.events:2:460800
+latest    raw.zone.events:3:397341
+latest    raw.zone.events:4:699741
+latest    raw.zone.events:5:526941
+latest    raw.zone.events:6:325341
+latest    raw.zone.events:7:564282
+latest    raw.zone.events:8:518400
+latest    raw.zone.events:9:555741
+latest    raw.zone.events:10:526941
+latest    raw.zone.events:11:432000
+
+--- 2. Broker retention settings ---
+log.message.timestamp.type=CreateTime sensitive=false synonyms={DEFAULT_CONFIG:log.message.timestamp.type=CreateTime}
+log.retention.hours=168 sensitive=false synonyms={DEFAULT_CONFIG:log.retention.hours=168}
+
+--- 3. The broker says why, in its own words ---
+[2026-09-17 13:24:07,384] INFO [UnifiedLog partition=raw.zone.events-4, dir=/var/lib/kafka/data] Deleting segment LogSegment(baseOffset=0, size=2118168, lastModifiedTime=1789651349305, largestRecordTimestamp=Some(1768486940992)) due to log retention time 604800000ms breach based on the largest recor
+[2026-09-17 13:24:07,412] INFO [UnifiedLog partition=raw.zone.events-5, dir=/var/lib/kafka/data] Deleting segment LogSegment(baseOffset=0, size=1990053, lastModifiedTime=1789651349305, largestRecordTimestamp=Some(1768486940991)) due to log retention time 604800000ms breach based on the largest recor
+
+--- 4. Decoding those two timestamps ---
+largestRecordTimestamp 1768486940992 -> 2026-01-15T14:22:20.992Z  <- SIMULATED event time
+lastModifiedTime       1789651349305 -> 2026-09-17T13:22:29.305Z  <- when it was really written
+apparent age on arrival: 245.0 days   retention: 7 days
+
+--- 5. Scale: segment deletions for this topic ---
+raw.zone.events segment deletions in this broker's lifetime: 64
+
+Last deletions (note the wall-clock time against the S2b consumer run at 16:45-16:49):
+[2026-09-17 16:49:55,151] INFO [LocalLog partition=raw.zone.events-11, dir=/var/lib/kafka/data] Deleting segment files LogSegment(baseOffset=361962, s
+[2026-09-17 16:49:55,167] INFO [LocalLog partition=raw.zone.events-3, dir=/var/lib/kafka/data] Deleting segment files LogSegment(baseOffset=334341, si
