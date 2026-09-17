@@ -239,7 +239,7 @@ code,pre,.mono{font-family:"IBM Plex Mono",ui-monospace,Menlo,Consolas,monospace
 @media(prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
 </style>
 
-<script id="app-state" type="application/json">{"done":["S1","S2a"]}</script>
+<script id="app-state" type="application/json">{"done":["S1","S2a","S2b"]}</script>
 
 <div class="wrap">
   <header class="masthead">
@@ -247,7 +247,7 @@ code,pre,.mono{font-family:"IBM Plex Mono",ui-monospace,Menlo,Consolas,monospace
     <h1>GeoPulse Build Console</h1>
     <p class="thesis">
       <em>A single sensor going critical is noise. The signal is the geometry.</em>
-      Fourteen sessions to turn a per-zone alerting pipeline into an engine that collapses
+      Fifteen sessions to turn a per-zone alerting pipeline into an engine that collapses
       alert storms into geographically-coherent incidents.
     </p>
   </header>
@@ -262,8 +262,8 @@ code,pre,.mono{font-family:"IBM Plex Mono",ui-monospace,Menlo,Consolas,monospace
 
       <div class="rail-block">
         <div class="rail-title">At a glance</div>
-        <div class="stat-row"><span class="stat-k">Sessions done</span><span class="stat-v" id="s-done">0 / 14</span></div>
-        <div class="stat-row"><span class="stat-k">Build time left</span><span class="stat-v" id="s-time">~14h</span></div>
+        <div class="stat-row"><span class="stat-k">Sessions done</span><span class="stat-v" id="s-done">0 / 15</span></div>
+        <div class="stat-row"><span class="stat-k">Build time left</span><span class="stat-v" id="s-time">~15h</span></div>
         <div class="stat-row"><span class="stat-k">At 2 / day</span><span class="stat-v" id="s-days">7 days</span></div>
         <div class="stat-row"><span class="stat-k">Resume update</span><span class="stat-v" id="s-resume">after S9</span></div>
       </div>
@@ -419,6 +419,63 @@ SCENARIO=regional-anomaly NUM_ZONES=200 npm run dev
 # let it run ~2 min, Ctrl+C
 cat ../../evals/groundtruth/*.jsonl | head -3</pre>
 <p>Check the JSONL carries <code>affectedZones</code> with per-zone onset times. Then run the same seed twice and <code>diff</code> the two files — they must be identical.</p>`},
+
+{id:"S2c",wp:"D10",t:"Fix the empty degradation stream",est:"60–90m",stage:0,
+p:`Read docs/STATUS.md, then docs/01-ARCHITECTURE.md section 3.4 (D10), then
+services/stream-processor/src/zoneStateStore.ts.
+
+Diagnose D10 before fixing anything. The previous session proved the events are fine and the
+consumption path is losing them, and deliberately did not guess at a mechanism. Do the same:
+establish the cause with evidence, tell me what it is, and only then fix it.
+
+A lead worth testing first, because the numbers fit too well to ignore:
+
+- Observed lastEventTime spread across zones was ~22 minutes. ZONE_STATE_IDLE_TTL_MS defaults
+  to 900000 ms = 15 minutes. 22 > 15.
+- Sensor lag is bounded at 20ms, so zones should be within 20ms of each other in event time.
+  A 22-minute spread is not the simulator - it is the consumer draining 12 partitions at
+  different rates.
+- ZoneStateStore.record advances \`watermark\` as a GLOBAL MAX over all zones, but zones live on
+  12 partitions that progress independently. A zone on a lagging partition therefore sits
+  permanently behind a watermark driven by the leading partition, lands past the idle cutoff,
+  and is evicted - then re-evicted on the next sweep, because the leading partition keeps
+  advancing. A zone in that loop can never hold a window long enough to confirm a transition.
+- S2b tested eviction and concluded it does not explain the symptom, on the grounds that an
+  evicted zone refills in five simulated minutes and still crosses. Check whether that test let
+  the zone refill UNDISTURBED. The live pattern is repeated eviction under a continuously
+  advancing watermark, which is a different thing.
+
+Confirm or kill this before building on it. Instrument the live run: log the watermark, the
+per-zone lastEventTime, and every eviction with the zone id, and show me whether zones are
+evicted once or in a loop. If the lead is wrong, say so and keep looking - a wrong diagnosis
+confidently fixed is worse than an open defect.
+
+If it is confirmed, the fix is the standard streaming answer: track a watermark PER PARTITION
+and take the global watermark as the MINIMUM across partitions, never the max. A watermark must
+not advance past the slowest input. kafkajs gives you the partition on every message.
+
+Scope guard: this is NOT a licence to implement full D3 watermarking. Allowed-lateness policy
+and late-event side outputs stay deferred to Phase 3. Fix the eviction correctness bug and stop.
+If diagnosis shows the real cause genuinely does require full watermarking, stop and tell me
+rather than expanding the phase on your own.
+
+Add a regression test that reproduces cross-partition skew deterministically and asserts zones
+on a lagging partition are not evicted. Re-run the live 400-zone regional-anomaly scenario and
+confirm degradations are actually emitted.
+
+Write ADR-007 on the watermark decision if the fix lands: why minimum and not maximum, and what
+the cost is (the whole pipeline advances at the slowest partition).
+
+Commit incrementally. Update docs/STATUS.md: D10 status, and whether WP6b is unblocked.\`,
+m:\`<p><span class="flag">Verification gate — do not start S3 on a zero</span></p>
+<pre># terminal 1
+cd services/stream-processor &amp;&amp; npm run dev
+# terminal 2
+cd services/sensor-simulator &amp;&amp; SCENARIO=regional-anomaly NUM_ZONES=400   SEED=42 SPEED_MULTIPLIER=3600 npm run dev
+
+# did anything actually come out?
+docker exec geopulse-kafka kafka-run-class kafka.tools.GetOffsetShell   --broker-list localhost:9092 --topic zone.degradations</pre>
+<p>Expect a non-zero offset sum, and roughly <strong>62 zones</strong> degrading for the seed-42 regional anomaly — that is the labelled count from WP6a, so the stream and the ground truth should agree.</p>\`},
 
 {id:"S3",wp:"WP1",t:"H3 spatial layer",est:"40–60m",stage:0,
 p:`Read docs/STATUS.md, then docs/02-PHASE-1-CORRELATION.md WP1.
@@ -662,7 +719,7 @@ const STAGES=[
  {n:"Ship",d:"README, ADRs, and the resume entry."}
 ];
 
-const TOTAL_MIN=[75,62,52,50,87,87,75,75,67,67,52,52,75,52];
+const TOTAL_MIN=[75,62,52,75,50,87,87,75,75,67,67,52,52,75,52];
 const PRISTINE='<!doctype html>\n'+document.documentElement.outerHTML;
 let state=JSON.parse(document.getElementById('app-state').textContent);
 let artifactApi=null, pubTimer=null;
@@ -689,10 +746,10 @@ function nextSession(){return SESSIONS.find(s=>!isDone(s.id))||null;}
 function render(){
   const nx=nextSession();
 
-  // honeycomb: rows of 5 / 5 / 4
+  // honeycomb: rows of 5 / 5 / 5
   const comb=document.getElementById('comb');
   comb.innerHTML='';
-  const rows=[SESSIONS.slice(0,5),SESSIONS.slice(5,10),SESSIONS.slice(10,14)];
+  const rows=[SESSIONS.slice(0,5),SESSIONS.slice(5,10),SESSIONS.slice(10,15)];
   rows.forEach((row,ri)=>{
     const r=document.createElement('div');
     r.className='comb-row'+(ri===1?' off':'');
@@ -714,13 +771,13 @@ function render(){
   });
 
   const n=state.done.length;
-  document.getElementById('meter').style.width=(n/14*100)+'%';
-  document.getElementById('s-done').textContent=n+' / 14';
+  document.getElementById('meter').style.width=(n/15*100)+'%';
+  document.getElementById('s-done').textContent=n+' / 15';
 
   let mins=0;
   SESSIONS.forEach((s,i)=>{if(!isDone(s.id))mins+=TOTAL_MIN[i];});
   document.getElementById('s-time').textContent='~'+Math.round(mins/60)+'h';
-  document.getElementById('s-days').textContent=Math.max(0,Math.ceil((14-n)/2))+' days';
+  document.getElementById('s-days').textContent=Math.max(0,Math.ceil((15-n)/2))+' days';
 
   const s9=isDone('S9');
   document.getElementById('s-resume').textContent=s9?'do it now':'after S9';

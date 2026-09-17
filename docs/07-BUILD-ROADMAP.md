@@ -65,7 +65,7 @@ session starts blind.
 
 ## 3. The session plan
 
-14 sessions. At two sessions a day that is about a week; at one a day, under two weeks.
+15 sessions. At two sessions a day that is about a week; at one a day, under two weeks.
 
 **S2a was inserted after S1's verification run found D8** — the simulator's event clock. Everything
 from WP2 onward is measured against simulated data, so a broken clock silently invalidates all of it.
@@ -75,6 +75,7 @@ from WP2 onward is measured against simulated data, so a broken clock silently i
 | S1 | WP0 | Defect fixes D1/D2/D4/D5, topic bootstrap, zone registry | 60–90m | Start infra, verify partitions |
 | S2a | D8 | Virtual event clock + redis password/port hardening | 50–75m | **Confirm transitions actually fire** |
 | S2b | WP6a | `regional-anomaly` scenarios + ground-truth emission | 45–60m | Run simulator, inspect JSONL |
+| S2c | D10 | Diagnose + fix the empty degradation stream | 60–90m | **Confirm degradations are emitted** |
 | S3 | WP1 | H3 neighbour graph + micro-benchmark + ADR-001 | 40–60m | Run bench, record numbers |
 | S4 | WP2a | CorrelationWindow, TimeAwareConnectivity, naive oracle, differential fuzz | 75–100m | Run fuzz test |
 | S5 | WP2b | IncidentLifecycle, merge/split, deterministic IDs, ADR-002/003 | 75–100m | Run property tests |
@@ -252,6 +253,80 @@ cat ../../evals/groundtruth/*.jsonl | head -3
 ```
 Check the JSONL has `affectedZones` with per-zone onset times. Run the same seed twice and
 confirm the files are identical (`diff`).
+
+---
+
+### S2c — D10: the live pipeline emits no degradations
+
+> **Added after S2b.** The pipeline consumes every event, registers every zone, and produces
+> zero degradations, while the identical stream replayed offline through the same
+> `TimeWindowManager` and `StateMachine` transitions 62/62 labelled zones. Everything from WP2
+> onward consumes this path.
+
+```
+Read docs/STATUS.md, then docs/01-ARCHITECTURE.md section 3.4 (D10), then
+services/stream-processor/src/zoneStateStore.ts.
+
+Diagnose D10 before fixing anything. The previous session proved the events are fine and the
+consumption path is losing them, and deliberately did not guess at a mechanism. Do the same:
+establish the cause with evidence, tell me what it is, and only then fix it.
+
+A lead worth testing first, because the numbers fit too well to ignore:
+
+- Observed lastEventTime spread across zones was ~22 minutes. ZONE_STATE_IDLE_TTL_MS defaults
+  to 900000 ms = 15 minutes. 22 > 15.
+- Sensor lag is bounded at 20ms, so zones should be within 20ms of each other in event time.
+  A 22-minute spread is not the simulator - it is the consumer draining 12 partitions at
+  different rates.
+- ZoneStateStore.record advances `watermark` as a GLOBAL MAX over all zones, but zones live on
+  12 partitions that progress independently. A zone on a lagging partition therefore sits
+  permanently behind a watermark driven by the leading partition, lands past the idle cutoff,
+  and is evicted - then re-evicted on the next sweep, because the leading partition keeps
+  advancing. A zone in that loop can never hold a window long enough to confirm a transition.
+- S2b tested eviction and concluded it does not explain the symptom, on the grounds that an
+  evicted zone refills in five simulated minutes and still crosses. Check whether that test let
+  the zone refill UNDISTURBED. The live pattern is repeated eviction under a continuously
+  advancing watermark, which is a different thing.
+
+Confirm or kill this before building on it. Instrument the live run: log the watermark, the
+per-zone lastEventTime, and every eviction with the zone id, and show me whether zones are
+evicted once or in a loop. If the lead is wrong, say so and keep looking - a wrong diagnosis
+confidently fixed is worse than an open defect.
+
+If it is confirmed, the fix is the standard streaming answer: track a watermark PER PARTITION
+and take the global watermark as the MINIMUM across partitions, never the max. A watermark must
+not advance past the slowest input. kafkajs gives you the partition on every message.
+
+Scope guard: this is NOT a licence to implement full D3 watermarking. Allowed-lateness policy
+and late-event side outputs stay deferred to Phase 3. Fix the eviction correctness bug and stop.
+If diagnosis shows the real cause genuinely does require full watermarking, stop and tell me
+rather than expanding the phase on your own.
+
+Add a regression test that reproduces cross-partition skew deterministically and asserts zones
+on a lagging partition are not evicted. Re-run the live 400-zone regional-anomaly scenario and
+confirm degradations are actually emitted.
+
+Write ADR-007 on the watermark decision if the fix lands: why minimum and not maximum, and what
+the cost is (the whole pipeline advances at the slowest partition).
+
+Commit incrementally. Update docs/STATUS.md: D10 status, and whether WP6b is unblocked.
+```
+
+**Manual afterwards** — verification gate:
+```bash
+cd infra && docker-compose up -d
+cd tools/kafka-bootstrap && npm run bootstrap
+
+# terminal 1
+cd services/stream-processor && npm run dev
+# terminal 2
+cd services/sensor-simulator && SCENARIO=regional-anomaly NUM_ZONES=400 SEED=42 SPEED_MULTIPLIER=3600 npm run dev
+
+# then: did anything actually come out?
+docker exec geopulse-kafka kafka-run-class kafka.tools.GetOffsetShell   --broker-list localhost:9092 --topic zone.degradations
+```
+Expect a non-zero offset sum, and roughly 62 zones degrading for the seed-42 regional anomaly.
+**Do not proceed to S3 on a zero.**
 
 ---
 
@@ -617,6 +692,7 @@ the repair prompt in §5 instead.
 |---|---|---|
 | Topic partition counts | S1 | Every scaling claim and every throughput benchmark rests on real partitions. Pre-existing topics auto-created with 1 partition are *not* resized by `createTopics` — they must be deleted first. |
 | Integration suite green | S1 | The D1 retry/DLQ path is only covered by the gated integration test; unit coverage of the wiring is 0%. Until it runs, "alerts are never silently lost" is a claim about code that has never executed. |
+| Degradations actually emitted | S2c | The live stack consumed 5.76M events, registered all 400 zones, and emitted zero degradations. A scored run against an empty stream reports a broken correlation engine whether or not the engine works. |
 | Pipeline actually transitions | S2a | S1's 120-second run produced **zero** state transitions with avg5m ≈ 0.9 against a 0.75 threshold. If the fixed clock does not reverse that, the correlation engine would be built against a simulator that can never express simultaneity. |
 | One incident, not hundreds | S7 | The entire thesis. If this is wrong, everything measured afterwards is measuring the wrong thing. |
 | Eval agrees with the live API | S11 | Two implementations of the headline metric that disagree means one is wrong, and it must not be the one on the resume. |
