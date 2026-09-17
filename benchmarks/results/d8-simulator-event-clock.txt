@@ -1,0 +1,33 @@
+Wall-clock elapsed:        60000 ms
+Event-time advanced, per zone:
+  Z-1     598 ms  (1.00% of real time)
+  Z-2     897 ms  (1.49% of real time)
+  Z-3    1196 ms  (1.99% of real time)
+  Z-4    1495 ms  (2.49% of real time)
+  Z-5    1794 ms  (2.99% of real time)
+  Z-6    2093 ms  (3.49% of real time)
+  Z-7    2392 ms  (3.99% of real time)
+  Z-8    2691 ms  (4.49% of real time)
+  Z-9    2990 ms  (4.98% of real time)
+  Z-10   3289 ms  (5.48% of real time)
+  Z-11   3588 ms  (5.98% of real time)
+  Z-12   3887 ms  (6.48% of real time)
+  Z-13   4186 ms  (6.98% of real time)
+  Z-14   4485 ms  (7.47% of real time)
+  Z-15   4784 ms  (7.97% of real time)
+  Z-16   5083 ms  (8.47% of real time)
+  Z-17   5382 ms  (8.97% of real time)
+  Z-18   5681 ms  (9.47% of real time)
+  Z-19   5980 ms  (9.97% of real time)
+  Z-20    299 ms  (0.50% of real time)
+
+Slowest zone:              299 ms (0.50% of real time)
+Fastest zone:              5980 ms (9.97% of real time)
+Divergence between zones:  5681 ms after only 60s
+
+Consequences:
+  - STRESSED confirmation needs 60s of EVENT time. At the slowest zone rate that
+    is 201 minutes of wall clock, which is why a 2-minute run alerts on nothing.
+  - Zones drift apart in event time at different rates, so two adjacent zones
+    never appear to degrade "at the same time" regardless of the physical scenario.
+    Spatial correlation (WP2) is built entirely on that judgement.

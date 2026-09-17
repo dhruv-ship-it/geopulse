@@ -85,7 +85,8 @@ is bounded by latency rather than by CPU.
 
 These are real bugs found by reading the code. Fixing them is work package **WP0**.
 
-**Status after WP0 (commit `7fa7e0a`): D1, D2, D4, D5, D7 closed. D3, D6 still open.**
+**Status after WP0: D1, D2, D4, D5, D7 closed. D3, D6 open as planned. D8 is NEW, found during
+live verification, and it BLOCKS WP2 — read §3.2 before starting WP1.**
 
 | # | Defect | Location | Why it matters |
 |---|---|---|---|
@@ -95,7 +96,52 @@ These are real bugs found by reading the code. Fixing them is work package **WP0
 | D4 ✅ | **Test coverage claim is hollow.** `jest.config.js` scopes `collectCoverageFrom` to exactly two files. Worse, `alert-processor/src/__tests__/alertFlow.int.test.ts` declares a *stub* `AlertProcessor` class inside the test file and tests that instead of the real implementation — the alert-processor lcov report reads `LH:0` (zero lines hit) for every source file. | `*/jest.config.js`, `alert-processor/src/__tests__/` | The current resume bullet claims 90%+ coverage. It is technically scoped to "core stream-processing logic" so it is not a lie, but it collapses under one follow-up question. |
 | D5 ✅ | **Unbounded zone state map.** `stream-processor` keeps `zoneStates` and `zoneCoordinates` maps that only ever grow. No eviction for zones that stop reporting. | `stream-processor/src/streamProcessor.ts` L20-21 | Memory leak at scale; relevant once we run 10k-zone benchmarks. |
 | D6 ⬜ | **Zookeeper-mode Kafka.** `confluentinc/cp-zookeeper` + ZK-coordinated broker. Zookeeper was removed entirely in Kafka 4.0; KRaft is the current standard. | `infra/docker-compose.yml` | Not urgent, but know the answer. Cheap to migrate and a good talking point. |
+| D8 ⛔ | **Simulator event clock does not track real time, and every zone's clock runs at a different rate.** Event time advances by a per-event constant, not by elapsed time, so it runs at 0.5–10% of wall clock and zones diverge 20× from each other. | `sensor-simulator/src/loadGenerator.ts` | **Blocks WP2.** Adjacent zones can never appear to degrade "at the same time", which is the entire premise of spatial correlation. See §3.2. |
 | D7 ✅ | **Simulator load depends on the host timezone.** `LoadGenerator.addRealisticVariation` read the time-of-day pattern with `Date#getHours()`, which is host-local. The same event timestamp produced a different load in a different timezone, or either side of a DST change. | `sensor-simulator/src/loadGenerator.ts` | Found while writing the WP0 determinism tests. Directly breaks the "simulator is deterministic" property that replay and every measured number rest on. Now `getUTCHours()`. |
+
+### 3.2 D8 — the simulator's event clock does not track real time (BLOCKS WP2)
+
+Found by running the full pipeline against the live stack during WP0 verification: a 120-second
+run at the default settings, with `avg5m ≈ 0.9` on every zone against a `0.75` threshold,
+produced **zero state transitions**.
+
+The cause is in `sensor-simulator/src/loadGenerator.ts`:
+
+```ts
+let eventTimestamp = this.zoneClocks.get(zone.zoneId) || producedAt;
+const processingDelay = 1 + (parseInt(zone.zoneId.replace('Z-', '')) % 20);
+eventTimestamp = Math.min(eventTimestamp + processingDelay, producedAt);
+```
+
+The clock is seeded at `producedAt` and thereafter advances by `processingDelay` **per event**,
+never by elapsed time. It therefore falls permanently behind and its rate is
+*(events per second for that zone) × (that zone's processingDelay)* — dependent on throughput,
+and **different for every zone**, because the delay is derived from the zone number.
+
+Measured (`benchmarks/results/d8-simulator-event-clock.txt`, 20 zones, 60s wall clock):
+
+| | Event time advanced | Rate |
+|---|---|---|
+| Slowest zone (Z-20) | 299 ms | 0.50% of real time |
+| Fastest zone (Z-19) | 5980 ms | 9.97% of real time |
+| **Divergence after 60s** | **5681 ms** | 20× spread |
+
+Two consequences, and the second is the serious one:
+
+1. The `STRESSED` confirmation needs 60s of *event* time. At the slowest zone's rate that is
+   **~200 minutes of wall clock**, which is why short runs alert on nothing. This alone makes
+   the system look broken and makes any latency measurement meaningless.
+2. **Zones drift apart in event time at different rates.** Two physically adjacent zones
+   degrading at the same real instant carry event timestamps minutes — eventually hours — apart.
+   Phase 1 is built entirely on the judgement *"these adjacent zones degraded within the same
+   window"*. Against this simulator that judgement can never be true, so the correlation engine
+   would correctly report no incidents and the eval harness would score it at zero recall.
+
+**This must be fixed before WP2 is testable, and before WP6a generates any ground truth.** It is
+not a WP0 defect and was deliberately not fixed there — the event-time model is a design decision
+that WP6a owns. The likely shape of the fix: derive `eventTimestamp` from `producedAt` minus a
+bounded per-zone lag (so the clock tracks real time and lateness is a small offset), rather than
+accumulating a per-event delay. That also gives D3's watermarking something coherent to watch.
 
 ### 3.1 How each closed defect was closed (WP0)
 
