@@ -1,0 +1,38 @@
+GeoPulse verification: D10 fix, live end-to-end
+generated: 2026-09-17T17:40:58Z
+commit:    bb441df
+node:      v20.14.0
+scenario:  SCENARIO=regional-anomaly NUM_ZONES=400 SEED=42 SPEED_MULTIPLIER=3600 RUN_DURATION_MS=14400000
+stack:     kafka (12 partitions) + redis + postgres via infra/docker-compose
+
+The same scenario that produced zero degradations before the fix.
+
+--- 1. Retention now holds. Earliest != latest, so data survives. ---
+earliest sum: 5845410
+latest sum:   11605410
+(before the fix these were equal: the topic was empty)
+
+--- 2. Segment deletions during this run ---
+deletions after the fix landed: 0
+
+--- 3. State transitions actually emitted ---
+  CRITICAL -> STRESSED     47
+  NORMAL -> STRESSED       62
+  STRESSED -> CRITICAL     47
+  STRESSED -> NORMAL       62
+
+  distinct zones NORMAL -> STRESSED : 62
+  distinct zones reaching CRITICAL  : 47
+  first STRESSED, event time        : 2026-01-15T12:41:15.985Z
+  last  STRESSED, event time        : 2026-01-15T12:42:37.993Z
+
+--- 4. Against the offline replay's prediction (wp6a-degradation-check.txt) ---
+  predicted STRESSED zones : 62        actual: 62
+  predicted CRITICAL zones : 47        actual: 47
+  predicted last STRESSED  : 2026-01-15T12:42:37.993Z   actual: 2026-01-15T12:42:37.993Z
+
+--- 5. Zone state eviction (the hypothesis that was killed) ---
+  sensor_events_processed_total 5760000
+  zones_tracked 400
+  zones_evicted_total 0
+  Zero evictions across 400 zones. The global-max watermark did not bite in this run.
