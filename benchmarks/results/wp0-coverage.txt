@@ -1,6 +1,6 @@
 GeoPulse coverage report
-generated: 2026-09-17T11:37:17Z
-commit:    f2ace62
+generated: 2026-09-17T12:20:09Z
+commit:    0035c1f
 
 ================================================================
 sensor-simulator
@@ -18,7 +18,7 @@ All files           |    36.7 |    34.48 |   34.48 |   35.51 |
 --------------------|---------|----------|---------|---------|-------------------
 Test Suites: 1 passed, 1 total
 Tests:       10 passed, 10 total
-Time:        5.994 s
+Time:        6.619 s
 
 ================================================================
 stream-processor
@@ -32,17 +32,17 @@ All files             |   38.39 |    49.39 |   42.85 |    38.2 |
  logger.ts            |       0 |        0 |     100 |       0 | 1-3               
  metrics.ts           |       0 |      100 |     100 |       0 | 1-47              
  redisClient.ts       |       0 |        0 |       0 |       0 | 1-71              
- redisWriter.ts       |   77.77 |    33.33 |   83.33 |   77.77 | 103-104,152-158   
+ redisWriter.ts       |   77.77 |    33.33 |   83.33 |   77.77 | 117-118,166-172   
  spatial.ts           |     100 |      100 |     100 |     100 |                   
  stateMachine.ts      |   93.02 |    94.73 |     100 |   93.02 | 96-97,115         
- streamProcessor.ts   |       0 |        0 |       0 |       0 | 2-307             
+ streamProcessor.ts   |       0 |        0 |       0 |       0 | 2-312             
  timeWindowManager.ts |     100 |      100 |     100 |     100 |                   
  zoneStateStore.ts    |   94.87 |       80 |      80 |   94.44 | 77-81             
 ----------------------|---------|----------|---------|---------|-------------------
 
 Test Suites: 4 passed, 4 total
 Tests:       54 passed, 54 total
-Time:        10.644 s
+Time:        13.398 s
 
 ================================================================
 alert-processor
@@ -62,8 +62,8 @@ All files           |   47.08 |    51.61 |   22.85 |   49.71 |
 --------------------|---------|----------|---------|---------|-------------------
 
 Test Suites: 1 skipped, 2 passed, 2 of 3 total
-Tests:       1 skipped, 13 passed, 14 total
-Time:        7.869 s
+Tests:       2 skipped, 13 passed, 15 total
+Time:        10.008 s, estimated 23 s
 
 ================================================================
 api
@@ -77,5 +77,5 @@ All files           |   19.17 |    24.28 |    22.5 |   17.96 |
 --------------------|---------|----------|---------|---------|-------------------
 Test Suites: 1 passed, 1 total
 Tests:       9 passed, 9 total
-Time:        8.883 s
+Time:        10.922 s
 
