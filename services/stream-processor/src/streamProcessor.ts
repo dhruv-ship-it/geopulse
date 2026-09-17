@@ -99,15 +99,36 @@ export class StreamProcessor {
     
     const duration = (Date.now() - this.startTime) / 1000;
     const rate = this.eventCounter / duration;
-    logger.info({ duration, totalEvents: this.eventCounter, stateTransitions: this.transitionCounter, averageRate: rate, zonesTracked: this.zones.size, zonesEvicted: this.zones.evicted }, 'Processing summary');
+    const diagnostics = this.zones.diagnostics();
+    const perZone = [...diagnostics.perZone.values()];
+    logger.info(
+      {
+        duration,
+        totalEvents: this.eventCounter,
+        stateTransitions: this.transitionCounter,
+        averageRate: rate,
+        zonesTracked: this.zones.size,
+        zonesEvicted: this.zones.evicted,
+        sweeps: diagnostics.sweeps,
+        zonesEvictedAtLeastOnce: diagnostics.perZone.size,
+        zonesEvictedMoreThanOnce: perZone.filter((n) => n > 1).length,
+        maxEvictionsForOneZone: perZone.length ? Math.max(...perZone) : 0,
+        maxZoneLagBehindWatermarkMs: diagnostics.maxLagBehindWatermarkMs,
+        finalPartitionSkewMs: this.partitionSkewMs(),
+        partitionHighWater: Object.fromEntries(this.partitionHighWater)
+      },
+      'Processing summary'
+    );
   }
 
   /**
    * Handle incoming sensor event
    */
-  private async handleEvent(event: SensorEvent): Promise<void> {
+  private async handleEvent(event: SensorEvent, partition: number): Promise<void> {
     this.eventCounter++;
     sensorEventsProcessedTotal.inc();
+
+    this.recordPartitionProgress(partition, event.eventTimestamp);
     
     // Track the zone and advance the event-time watermark. The store creates state on first
     // sight and evicts zones that have gone quiet, so the maps are bounded (D5).
@@ -244,8 +265,19 @@ export class StreamProcessor {
     const evicted = this.zones.sweep();
     if (evicted.length > 0) {
       zonesEvictedTotal.inc(evicted.length);
+      const diagnostics = this.zones.diagnostics();
+      const repeatedlyEvicted = [...diagnostics.perZone.values()].filter((n) => n > 1).length;
       logger.info(
-        { evicted: evicted.length, tracked: this.zones.size, watermark: this.zones.currentWatermark },
+        {
+          evicted: evicted.length,
+          tracked: this.zones.size,
+          watermark: this.zones.currentWatermark,
+          // The three numbers that tell a one-off eviction apart from a loop.
+          partitionSkewMs: this.partitionSkewMs(),
+          evictionsTotal: diagnostics.evictions,
+          zonesEvictedMoreThanOnce: repeatedlyEvicted,
+          sampleEvicted: evicted.slice(0, 5)
+        },
         'Evicted idle zone state'
       );
     }
@@ -255,6 +287,29 @@ export class StreamProcessor {
     if (this.eventCounter % 1000 === 0) {
       this.logProgress(event, avg1m, avg5m);
     }
+  }
+
+  /**
+   * Highest event time seen on each partition, for D10 diagnosis.
+   *
+   * Kafka only guarantees order within a partition, and kafkajs drains partitions concurrently,
+   * so each one is an independent stream of event time. How far apart they run is the quantity
+   * the eviction bug turns on, and nothing was measuring it.
+   */
+  private readonly partitionHighWater = new Map<number, number>();
+
+  private recordPartitionProgress(partition: number, eventTime: number): void {
+    const current = this.partitionHighWater.get(partition);
+    if (current === undefined || eventTime > current) {
+      this.partitionHighWater.set(partition, eventTime);
+    }
+  }
+
+  /** Spread between the fastest and slowest partition, in event-time milliseconds. */
+  private partitionSkewMs(): number {
+    if (this.partitionHighWater.size < 2) return 0;
+    const values = [...this.partitionHighWater.values()];
+    return Math.max(...values) - Math.min(...values);
   }
 
   /**

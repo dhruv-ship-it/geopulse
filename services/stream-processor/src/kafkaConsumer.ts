@@ -13,7 +13,7 @@ export class KafkaEventConsumer {
   private kafka: Kafka;
   private consumer: Consumer;
   private isConnected: boolean = false;
-  private messageHandler: ((event: SensorEvent) => Promise<void>) | null = null;
+  private messageHandler: ((event: SensorEvent, partition: number) => Promise<void>) | null = null;
 
   constructor() {
     this.kafka = new Kafka({
@@ -76,7 +76,9 @@ export class KafkaEventConsumer {
   /**
    * Set message handler and start consuming
    */
-  async startConsuming(messageHandler: (event: SensorEvent) => Promise<void>): Promise<void> {
+  async startConsuming(
+    messageHandler: (event: SensorEvent, partition: number) => Promise<void>
+  ): Promise<void> {
     if (!this.isConnected) {
       throw new Error('Kafka consumer not connected');
     }
@@ -91,7 +93,11 @@ export class KafkaEventConsumer {
           const event: SensorEvent = JSON.parse(message.value.toString());
           
           if (this.messageHandler) {
-            await this.messageHandler(event);
+            // The partition goes through to the processor because event-time progress is a
+            // per-partition property: kafkajs drains partitions concurrently and at different
+            // rates, so "the highest event time seen" says nothing about how far the slowest
+            // input has actually got.
+            await this.messageHandler(event, partition);
           }
         } catch (error) {
           console.error('❌ Error processing message:', error);

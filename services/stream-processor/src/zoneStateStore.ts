@@ -9,6 +9,17 @@ export interface ZoneEntry {
   registered: boolean;
 }
 
+export interface EvictionDiagnostics {
+  /** Sweeps that actually ran (i.e. were due), not calls to sweep(). */
+  sweeps: number;
+  /** Total evictions, counting a zone once per time it was evicted. */
+  evictions: number;
+  /** Per-zone eviction count. A zone appearing here more than once was evicted in a loop. */
+  perZone: Map<string, number>;
+  /** Widest observed gap between the watermark and the oldest tracked zone's last event. */
+  maxLagBehindWatermarkMs: number;
+}
+
 export interface ZoneStateStoreOptions {
   /**
    * How long a zone may go without an event before its in-memory state is dropped.
@@ -51,6 +62,14 @@ export class ZoneStateStore {
   private readonly idleTtlMs: number;
   private readonly sweepIntervalMs: number;
   private evictedCount = 0;
+  private sweepCount = 0;
+  /**
+   * Per-zone eviction tally. This is the number that separates "a zone went quiet and was
+   * dropped once" from "a zone is being evicted repeatedly while its events are still
+   * arriving" — which are the same event count and completely different defects.
+   */
+  private readonly evictionsByZone = new Map<string, number>();
+  private maxLagBehindWatermarkMs = 0;
 
   constructor(options: ZoneStateStoreOptions = {}) {
     this.idleTtlMs = options.idleTtlMs ?? DEFAULT_IDLE_TTL_MS;
@@ -67,6 +86,15 @@ export class ZoneStateStore {
 
   get currentWatermark(): number {
     return this.watermark;
+  }
+
+  diagnostics(): EvictionDiagnostics {
+    return {
+      sweeps: this.sweepCount,
+      evictions: this.evictedCount,
+      perZone: new Map(this.evictionsByZone),
+      maxLagBehindWatermarkMs: this.maxLagBehindWatermarkMs
+    };
   }
 
   has(zoneId: string): boolean {
@@ -120,6 +148,7 @@ export class ZoneStateStore {
   sweep(): string[] {
     if (this.watermark - this.lastSweepAt < this.sweepIntervalMs) return [];
     this.lastSweepAt = this.watermark;
+    this.sweepCount++;
     return this.evictIdle();
   }
 
@@ -128,9 +157,14 @@ export class ZoneStateStore {
     const cutoff = this.watermark - this.idleTtlMs;
     const evicted: string[] = [];
     for (const [zoneId, entry] of this.zones) {
+      const lagMs = this.watermark - entry.lastEventTime;
+      if (lagMs > this.maxLagBehindWatermarkMs) {
+        this.maxLagBehindWatermarkMs = lagMs;
+      }
       if (entry.lastEventTime < cutoff) {
         this.zones.delete(zoneId);
         evicted.push(zoneId);
+        this.evictionsByZone.set(zoneId, (this.evictionsByZone.get(zoneId) ?? 0) + 1);
       }
     }
     this.evictedCount += evicted.length;
