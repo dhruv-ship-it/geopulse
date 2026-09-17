@@ -108,8 +108,8 @@ docker-compose up -d
 
 This starts:
 - Zookeeper & Kafka (ports 2181, 9092)
-- Redis (port 6380)
-- PostgreSQL (port 5432)
+- Redis (port 6390, password required)
+- PostgreSQL (port 5434)
 
 ### Environment Setup
 ```bash
@@ -174,9 +174,10 @@ All services use environment variables for configuration:
 |----------|---------|-------------|
 | KAFKA_BROKER | localhost:9092 | Kafka broker address |
 | REDIS_HOST | localhost | Redis host |
-| REDIS_PORT | 6380 | Redis port |
+| REDIS_PORT | 6390 | Redis port |
+| REDIS_PASSWORD | geopulse-dev | Redis password; must match `--requirepass` in `infra/docker-compose.yml` |
 | POSTGRES_HOST | localhost | PostgreSQL host |
-| POSTGRES_PORT | 5432 | PostgreSQL port |
+| POSTGRES_PORT | 5434 | PostgreSQL port |
 | POSTGRES_DB | geopulse | PostgreSQL database |
 | POSTGRES_USER | geopulse | PostgreSQL user |
 | POSTGRES_PASSWORD | geopulse | PostgreSQL password |

@@ -39,8 +39,10 @@ services:
     image: postgres:16-alpine
     container_name: geopulse-postgres
     ports:
-      # 5433 for the same reason as Redis above: 5432 is taken by another project locally.
-      - "5433:5432"
+      # 5434, not 5432 and not 5433: both are taken by other projects on this machine. The
+      # port move only buys a clean start - what stops a wrong connection is that Postgres has
+      # always required a password. Redis is the one that needed the guard added.
+      - "5434:5432"
     environment:
       POSTGRES_USER: geopulse
       POSTGRES_PASSWORD: geopulse

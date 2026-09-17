@@ -83,7 +83,7 @@ Returns service status information.
 ## Running the Service
 
 ### Prerequisites
-- Redis running on localhost:6380
+- Redis running on localhost:6390 (password `geopulse-dev`)
 - Node.js 18+
 
 ### Installation
@@ -108,7 +108,8 @@ npm start
 Environment variables:
 - `PORT`: API server port (default: 3000)
 - `REDIS_HOST`: Redis host (default: localhost)
-- `REDIS_PORT`: Redis port (default: 6380)
+- `REDIS_PORT`: Redis port (default: 6390)
+- `REDIS_PASSWORD`: Redis password (default: geopulse-dev)
 
 ## Redis Data Model
 

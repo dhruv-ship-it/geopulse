@@ -2,9 +2,10 @@ import { Client, ClientConfig } from 'pg';
 
 const DB_CONFIG: ClientConfig = {
   host: process.env.POSTGRES_HOST || 'localhost',
-  // 5433, not 5432: another project's Postgres owns the default port on the dev machine, and a
-  // service that connects to the wrong database is worse than one that fails to start.
-  port: parseInt(process.env.POSTGRES_PORT || '5433', 10),
+  // 5434: both 5432 and 5433 are held by other projects on the dev machine. Postgres already
+  // fails loudly on a wrong connection because it demands a password; this is only about
+  // being able to start at all.
+  port: parseInt(process.env.POSTGRES_PORT || '5434', 10),
   database: process.env.POSTGRES_DB || 'geopulse',
   user: process.env.POSTGRES_USER || 'geopulse',
   password: process.env.POSTGRES_PASSWORD || 'geopulse',

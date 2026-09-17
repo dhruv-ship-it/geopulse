@@ -9,7 +9,8 @@ Redis Keys:
 Configuration (env):
 - `KAFKA_BROKER` (default: `localhost:9092`)
 - `REDIS_HOST` (default: `localhost`)
-- `REDIS_PORT` (default: `6380`)
+- `REDIS_PORT` (default: `6390`)
+- `REDIS_PASSWORD` (default: `geopulse-dev`)
 - `ALERT_HISTORY_LIMIT` (default: `100`)
 - `ALERT_GLOBAL_LIMIT` (default: `1000`)
 
