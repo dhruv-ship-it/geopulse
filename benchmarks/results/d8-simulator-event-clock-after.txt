@@ -1,0 +1,50 @@
+Config:                    SIM_STEP_MS=1000, SPEED_MULTIPLIER=1, 20 zones
+Wall-clock elapsed:        60000 ms
+Event-time advanced, per zone:
+  Z-1    59000 ms  ( 98.33% of real time)  sensor lag  9 ms
+  Z-2    59000 ms  ( 98.33% of real time)  sensor lag 14 ms
+  Z-3    59000 ms  ( 98.33% of real time)  sensor lag 19 ms
+  Z-4    59000 ms  ( 98.33% of real time)  sensor lag  3 ms
+  Z-5    59000 ms  ( 98.33% of real time)  sensor lag  8 ms
+  Z-6    59000 ms  ( 98.33% of real time)  sensor lag 13 ms
+  Z-7    59000 ms  ( 98.33% of real time)  sensor lag 18 ms
+  Z-8    59000 ms  ( 98.33% of real time)  sensor lag  2 ms
+  Z-9    59000 ms  ( 98.33% of real time)  sensor lag  7 ms
+  Z-10   59000 ms  ( 98.33% of real time)  sensor lag  4 ms
+  Z-11   59000 ms  ( 98.33% of real time)  sensor lag 20 ms
+  Z-12   59000 ms  ( 98.33% of real time)  sensor lag 15 ms
+  Z-13   59000 ms  ( 98.33% of real time)  sensor lag 10 ms
+  Z-14   59000 ms  ( 98.33% of real time)  sensor lag  3 ms
+  Z-15   59000 ms  ( 98.33% of real time)  sensor lag 19 ms
+  Z-16   59000 ms  ( 98.33% of real time)  sensor lag 14 ms
+  Z-17   59000 ms  ( 98.33% of real time)  sensor lag  9 ms
+  Z-18   59000 ms  ( 98.33% of real time)  sensor lag  2 ms
+  Z-19   59000 ms  ( 98.33% of real time)  sensor lag 18 ms
+  Z-20   59000 ms  ( 98.33% of real time)  sensor lag  3 ms
+
+Slowest zone:              59000 ms (98.33% of real time)
+Fastest zone:              59000 ms (98.33% of real time)
+Divergence between zones:  0 ms after 60s
+Max sensor lag (bound):    20 ms
+  (measured first sample to last, so one step short of the window: 60 samples 1000 ms apart span 59s of a 60s window. The rate itself is exactly 1x.)
+
+Zone-to-zone spread at a single instant:
+  min lag 2 ms, max lag 20 ms, spread 18 ms — bounded, and constant for the life of the run
+
+Wall-clock cost of one 60s STRESSED confirmation window:
+  SPEED_MULTIPLIER=  1    60.00 s of wall clock   (20 events/real second at 20 zones)
+  SPEED_MULTIPLIER= 10     6.00 s of wall clock   (200 events/real second at 20 zones)
+  SPEED_MULTIPLIER= 60     1.00 s of wall clock   (1200 events/real second at 20 zones)
+  SPEED_MULTIPLIER=600     0.10 s of wall clock   (12000 events/real second at 20 zones)
+
+Determinism:
+  same 300-step event stream at 1x and 60x: yes
+  same 300-step event stream across two runs at 1x: yes
+  achieved simulated ms per real ms at SPEED_MULTIPLIER=1: 1
+
+Consequences:
+  - Event time now advances at exactly SPEED_MULTIPLIER x real time, so a 60s
+    confirmation window costs 60s of wall clock at 1x and 1s at 60x.
+  - All zones read one clock, so two adjacent zones degrading at the same
+    simulated instant carry timestamps at most 20 ms apart, forever. That is
+    the judgement spatial correlation (WP2) is built on.
