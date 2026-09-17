@@ -5,18 +5,19 @@ import { haversineKm } from '../geo';
 const RES = 5;
 
 /**
- * Two bounds on what a one-ring res-5 neighbourhood means in kilometres, both measured rather
- * than assumed — `benchmarks/results/wp1-neighbour-graph.txt` reports them for the field it
- * builds, and this file re-derives them for its own field.
+ * Two bounds on what a one-ring res-5 neighbourhood means in kilometres.
  *
- * They are deliberately loose against the measured values (35.8 km and 11.5 km): the point of
- * the assertions below is that cell adjacency *brackets* a distance threshold, not that it
- * equals one. It cannot equal one — a hexagon is not a circle, so there is a band in which two
- * zones may or may not be neighbours depending on where the cell boundary happens to fall. Any
- * test that pretended otherwise would be asserting something false.
+ * Cell adjacency *brackets* a distance threshold rather than equalling one — a hexagon is not
+ * a circle, so between the two bounds it depends on where the boundary happens to fall, and a
+ * test that asserted a single radius would be asserting something false.
+ *
+ * Both are deliberately loose, because the band itself moves with the cells: res-5 cells run
+ * from 156 km² to 305 km² around the globe. `benchmarks/results/wp1-neighbour-graph.txt`
+ * measures the envelope at 9.2 km / 31.7 km for an equatorial field; the same measurement over
+ * this file's field near 28.6°N gives 11.5 km / 35.8 km.
  */
 const NEIGHBOURS_ARE_WITHIN_KM = 40;
-const CLOSER_THAN_THIS_IS_ALWAYS_A_NEIGHBOUR_KM = 10;
+const CLOSER_THAN_THIS_IS_ALWAYS_A_NEIGHBOUR_KM = 8;
 
 function zone(zoneId: string, latitude: number, longitude: number): ZoneLocation {
   return { zoneId, latitude, longitude };

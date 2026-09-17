@@ -1,0 +1,66 @@
+GeoPulse WP1 - NeighbourGraph vs a naive haversine scan
+generated: 2026-09-17T18:21:39.636Z
+node v20.14.0 on win32 x64
+H3 resolution 5, ring size 1, naive radius 25 km, seed 42
+
+Zone placement is deterministic. Timings are wall-clock on one machine - the shape of
+the curve across zone counts is the result, not the absolute microseconds.
+
+================================================================
+constant density - the region grows with the fleet
+================================================================
+25 zones per 10 000 km2 (a 100 km square) - the density of the
+reference config, 400 zones in a 400 km square. Zone density is identical at 1k and at 100k,
+so any change in the neighbour column comes from the grid or the edges, not from the fleet size.
+
+zones     region      build     neighboursOf   naive scan     speedup   nbrs/zone   cell    hex vs 25km
+                                 us/lookup      us/lookup               hex/circle   km2   recall  prec.
+   1000     632 km      28 ms        0.580         39.6        68x     2.9/4.5      188    62.7%   96.4%
+  10000    2000 km      64 ms        0.767        399.2       521x     3.4/4.8      201    65.9%   93.5%
+ 100000    6325 km     397 ms        1.033       4630.7      4484x     4.2/4.8      257    75.6%   85.7%
+The hex disk and the 25 km circle are not the same query - a 7-cell disk covers about
+7 x the cell area above, the circle covers 1963 km2 - which is what recall and precision
+report. It is not a thumb on the scale either way: the scan computes a distance to every
+zone whatever the radius, so its cost is set by the fleet size and not by the question.
+
+================================================================
+constant area - the same ground, packed tighter
+================================================================
+All fleets inside one 400 km square, so neighbourhoods really do get denser.
+The graph is expected to slow down here: it pays for the size of the answer, not for the search.
+
+zones     region      build     neighboursOf   naive scan     speedup   nbrs/zone   cell    hex vs 25km
+                                 us/lookup      us/lookup               hex/circle   km2   recall  prec.
+   1000     400 km       5 ms        0.696         59.6        86x     7.6/11.4     188    64.4%   96.6%
+  10000     400 km      48 ms        1.657        395.7       239x    78.6/116.9    188    64.8%   96.3%
+ 100000     400 km     351 ms       31.910       4080.6       128x   771.3/1141.8   188    65.1%   96.4%
+The hex disk and the 25 km circle are not the same query - a 7-cell disk covers about
+7 x the cell area above, the circle covers 1963 km2 - which is what recall and precision
+report. It is not a thumb on the scale either way: the scan computes a distance to every
+zone whatever the radius, so its cost is set by the fleet size and not by the question.
+
+================================================================
+geometry of the chosen grid (the numbers ADR-001 argues from)
+================================================================
+
+H3 resolution 5: average edge 9.85 km, average area 252.9 km2
+ring size 1: a neighbourhood of 7 cells (1 + 3k(k+1)), fixed whatever the zone count
+
+hexagon neighbour equidistance, over 5000 cells sampled uniformly by area
+  furthest / nearest of the six neighbour centres: median 1.0453, mean 1.0529, worst 1.2072
+  the same ratio on a square grid is exactly 1.4142 for the four diagonal neighbours,
+  and it is exact everywhere - it is the grid, not a projection artefact.
+
+cell area spread at resolution 5, 5000 cells sampled uniformly by area
+  min 156.4 km2, max 305.1 km2, ratio 1.95
+  12 pentagons exist at every resolution; the first is 127.8 km2 with 5 neighbours
+
+what a one-ring neighbourhood means on the ground, over 1200 zones in a 200 km square
+  two zones 9.2 km apart can already be non-neighbours
+  two zones 31.7 km apart can still be neighbours
+  so cell adjacency brackets a distance threshold rather than equalling one. Closer than
+  the first figure is always adjacent, further than the second never is, and in between it
+  depends where the boundary falls. See ADR-001 on why that band is acceptable.
+
+resolution sanity: every cell above is resolution 5
+
