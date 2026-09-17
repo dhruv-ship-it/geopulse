@@ -100,7 +100,7 @@ before/after measurement. WP2 is no longer blocked.**
 | D8 ✅ | **Simulator event clock did not track real time, and every zone's clock ran at a different rate.** Event time advanced by a per-event constant, not by elapsed time, so it ran at 0.5–10% of wall clock and zones diverged 20× from each other. | `sensor-simulator/src/loadGenerator.ts` | Blocked WP2: adjacent zones could never appear to degrade "at the same time", which is the entire premise of spatial correlation. Closed in S2a by a shared virtual clock — see §3.2 and `docs/adr/ADR-005-simulated-event-time.md`. |
 | D7 ✅ | **Simulator load depends on the host timezone.** `LoadGenerator.addRealisticVariation` read the time-of-day pattern with `Date#getHours()`, which is host-local. The same event timestamp produced a different load in a different timezone, or either side of a DST change. | `sensor-simulator/src/loadGenerator.ts` | Found while writing the WP0 determinism tests. Directly breaks the "simulator is deterministic" property that replay and every measured number rest on. Now `getUTCHours()`. |
 | D9 ✅ | **Zones were too far apart to have neighbours.** The fibonacci-spiral layout spreads zones over the whole planet: the closest pair anywhere is 160 km apart at 5000 zones, and *zero* pairs fall within an H3 res-5 one-ring neighbourhood at any zone count the project runs at. | `sensor-simulator/src/zoneGenerator.ts` | Found in S2b while building the eval scenarios. A regional anomaly would have covered exactly one zone, every connected component would have been a singleton, and the collapse ratio would have been zero — the correlation engine would have measured as broken while being correct. Closed by the `regional-grid` layout; evidence in `benchmarks/results/d9-zone-spacing.txt`, see §3.3. |
-| D10 ⬜ | **The live pipeline produces zero degradations from a stream that provably should degrade.** A 400-zone `regional-anomaly` run put 5.76M events through Kafka; all were consumed (lag 0 on every partition), all 400 zones registered in Redis — and the state machine emitted **nothing**, leaving every zone at `avg1m = avg5m = 0` with `lastEventTime` set. | `stream-processor/src/` — component not yet identified | **Blocks WP6b.** Replaying the identical events through the same `TimeWindowManager` and `StateMachine` in per-zone order transitions all 62 labelled zones to STRESSED and 47 to CRITICAL (`benchmarks/results/wp6a-degradation-check.txt`), so the events are not the problem — the consumption path is. Mechanism not yet established; see §3.4. |
+| D10 ✅ | **Kafka deleted the events before they could be consumed.** The simulator set each record's Kafka timestamp to simulated event time; retention is evaluated against that field, and with a fixed historical simulated epoch (ADR-005) against `CreateTime` + 7-day retention every message arrived **245 days past its deletion deadline**. The broker deleted each segment seconds after it rolled — 5.76M events destroyed underneath a consumer still reading them. | `sensor-simulator/src/kafkaProducer.ts`, `tools/kafka-bootstrap/src/topics.ts` | Blocked WP6b. Closed in S2c: the producer sets no record timestamp and all topics pin `message.timestamp.type=LogAppendTime`. The bootstrap also had to learn to reconcile configs on existing topics, or the fix would have been a no-op on every broker that already had them. Verified: 0 deletions, 62 zones STRESSED, 47 CRITICAL. See §3.4 and ADR-007. |
 
 ### 3.2 D8 — the simulator's event clock did not track real time (CLOSED in S2a)
 
@@ -236,67 +236,118 @@ high-baseline zones — spatially correlated baseline load, which is exactly the
 correlation engine is supposed to find only when an anomaly put it there.
 
 
-### 3.4 D10 — the live pipeline emits no degradations (OPEN, blocks WP6b)
+### 3.4 D10 — Kafka deleted the events before they could be consumed (CLOSED in S2c)
 
-Found in S2b while verifying that the WP6a anomaly injection is calibrated against the real
-state machine.
+Found in S2b, diagnosed and closed in S2c. Evidence: `benchmarks/results/d10-root-cause.txt`.
 
-**What was run.** `SCENARIO=regional-anomaly NUM_ZONES=400 SEED=42 SPEED_MULTIPLIER=3600`, four
-simulated hours, against the live stack. The simulator produced 5,760,000 events and stopped
-itself at the planned end.
+**The symptom.** `SCENARIO=regional-anomaly NUM_ZONES=400 SEED=42 SPEED_MULTIPLIER=3600`, four
+simulated hours against the live stack. The simulator produced 5,760,000 events. The pipeline
+emitted **zero** degradations.
 
-**What was observed.**
+**What it was not.** S2b established that the events themselves were fine: replaying the
+identical stream through the stream processor's own `TimeWindowManager` and `StateMachine` drove
+all 62 labelled zones to STRESSED and 47 to CRITICAL, with 0 transitions among 40 unlabelled
+controls (`benchmarks/results/wp6a-degradation-check.txt`). The loss was between "produced" and
+"processed".
 
-| Signal | Value |
+The leading hypothesis was watermark-driven eviction in `ZoneStateStore`, and the numbers fitted:
+the observed ~22-minute spread in per-zone `lastEventTime` exceeded the 15-minute idle TTL, so
+zones on a lagging partition should have been evicted while their events were still arriving.
+**It was wrong.** The events were never reaching the processor to be evicted.
+
+**The cause.** `raw.zone.events` was empty — not partially consumed, empty. Earliest offset
+equalled latest offset on all twelve partitions. The broker said why in its own log:
+
+```
+Deleting segment LogSegment(baseOffset=0, size=2118168,
+  lastModifiedTime=1789651349305, largestRecordTimestamp=Some(1768486940992))
+  due to log retention time 604800000ms breach based on the largest record timestamp
+```
+
+| Field | Value | Meaning |
+|---|---|---|
+| `largestRecordTimestamp` | 1768486940992 | 2026-01-15T14:22:20Z — the **simulated** event time |
+| `lastModifiedTime` | 1789651349305 | 2026-09-17T13:22:29Z — when the segment was really written |
+
+The simulator set each Kafka record's timestamp to its simulated event time. Retention is
+evaluated against that field; simulated time starts at a fixed epoch in the past so runs stay
+comparable (ADR-005); the topics ran the default `CreateTime` with 7-day retention. Every message
+was therefore **245 days past its deletion deadline the instant it was written**, and the broker
+deleted each segment seconds after it rolled — 64 deletions, several at 16:49:55 while a consumer
+was mid-read.
+
+**That accounts for every S2b observation without eviction:**
+
+| S2b observation | Explanation |
 |---|---|
-| Consumer lag, all 12 partitions | 0 — everything was consumed |
-| Zones in `zones:registry` | 400 — the processor saw and registered every zone |
-| `zone.degradations` messages | **0** |
-| `zone:Z-90` after the run | `state=NORMAL`, `avg1m=0`, `avg5m=0`, `lastEventTime` set and inside the run |
-| `lastEventTime` spread across zones | ~22 minutes |
+| Zero degradations | The anomaly window lived in segments deleted before the consumer reached them |
+| Lag 0 on every partition | Not "all consumed" — once the log start offset passes a committed offset, lag reads zero because the data was **deleted** |
+| All 400 zones registered | The consumer did read the earliest prefix; every zone appears within the first 400 events |
+| `avg1m = avg5m = 0` in Redis | Never a window reading. `writeZoneState` only fires on a transition, so these are the `registerZone` defaults for a zone that never transitioned |
+| ~22-minute `lastEventTime` spread | A ragged partial prefix — different amounts read per partition before deletion |
 
-**Why this is not a simulator defect.** Replaying the identical event stream through the
-stream-processor's own `TimeWindowManager` and `StateMachine`, in per-zone order, with no broker
-involved:
+That fourth row is what made eviction look insufficient in S2b, and it was a false premise: the
+zeroes were never evidence about window state at all.
 
-| Scenario | Labelled zones | Reached STRESSED | Reached CRITICAL | Median lag from labelled onset |
-|---|---|---|---|---|
-| `regional-anomaly` | 62 | 62 | 47 | 256 s |
-| `propagating-anomaly` | 57 | 57 | 46 | 291 s |
-| `multi-anomaly` | 43 | 43 | 34 | 258 s |
-| `noise` | 16 | 16 | 16 | 260 s |
+**Fix.** Two changes, one the fix and one the guarantee — reasoning in
+`docs/adr/ADR-007-record-timestamp-vs-event-time.md`.
 
-Plus a control: 40 zones the ground truth leaves out produce **0** transitions. Raw output in
-`benchmarks/results/wp6a-degradation-check.txt`, re-runnable via
-`benchmarks/anomaly-degradation-check.ts`.
+1. The producer sets no record timestamp; the broker stamps arrival. Event time continues to
+   travel in the payload as `eventTimestamp`, which is the only place any consumer reads it.
+2. All five topics pin `message.timestamp.type=LogAppendTime`, so the broker stamps arrival time
+   whatever a producer claims.
 
-So the events carry exactly the loads the labels claim, and those loads clear the real state
-machine's thresholds with room to spare. Something between "consumed from Kafka" and "evaluated"
-is losing them.
+A third change was needed to make the second one real: `admin.createTopics` does not apply
+`configEntries` to a topic that already exists, so the config would have done nothing on every
+broker that already had the topic — which is every broker that has ever run this project. **D10
+would have survived its own fix.** `tools/kafka-bootstrap` now reconciles configs against what
+the broker actually has.
 
-**Lead, not yet a diagnosis.** `ZoneStateStore` evicts a zone when the watermark — the highest
-event time seen across *all* zones — has moved more than `ZONE_STATE_IDLE_TTL_MS` (15 min) past
-that zone's own last event. With 12 partitions consumed concurrently, one partition runs ahead of
-another, so zones on a lagging partition are evicted as "idle" while their events are still
-arriving, and eviction discards their windows. The observed ~22-minute spread in `lastEventTime`
-exceeds the TTL, and the reproduction confirms the evictions happen: 7,230 at 20 minutes of
-simulated skew, 19,280 at 45 minutes.
+**Verified.** Re-running the identical scenario after the fix:
 
-**But that does not close it.** An evicted zone rebuilds its five-minute window within five
-simulated minutes and still crosses the threshold — peak `avg5m` stays above 0.75 in every
-skew row measured. Eviction alone therefore cannot produce `avg5m = 0`. Something further is
-needed: repeated eviction at a cadence shorter than the window, an interaction with D3's
-eviction-on-incoming-timestamp in `TimeWindowManager`, or a factor not yet probed.
+| Signal | Before | After |
+|---|---|---|
+| Segment deletions during the run | 64 | 0 |
+| `zone.alerts` messages produced | 0 | 288 |
+| Zones reaching STRESSED | 0 | 62 |
+| Zones reaching CRITICAL | 0 | 47 |
 
-This is recorded as an open lead rather than a closed defect on purpose. The tempting move was to
-write down the first plausible mechanism and move on; it was tested, and it does not account for
-what was seen.
+The 62 and 47 match the offline replay's prediction exactly, and the first STRESSED transitions
+landed at simulated 12:41, where the replay said they would. Raw output in
+`benchmarks/results/d10-after-fix.txt`.
 
-**Why it blocks WP6b.** The eval harness scores incidents against ground truth. With zero
-degradations there are no incidents, so every scenario would report a collapse ratio of zero and
-recall of zero — indistinguishable from a correlation engine that does not work. No number taken
-before this is fixed means anything.
+**Why the retention question is worth knowing.** The broken version looks *more* correct than the
+fixed one — "this is an event-time pipeline, so stamp the record with event time" sounds like
+rigour. The failure is invisible from the producer (the send succeeds, offsets advance) and
+invisible from the consumer's usual health signal (lag reads zero, which looks like "caught up"
+and meant "nothing left to be behind"). A monitoring dashboard would have shown a green pipeline
+throughout. Every timestamp needs an owner: event time answers "when did the world change" and
+belongs to the application; record time answers "how old is this data on disk" and belongs to the
+broker.
 
+### 3.5 The watermark question — open, and deliberately not fixed
+
+`ZoneStateStore` advances a single watermark as the **maximum** event time seen across all zones,
+and evicts a zone when the watermark passes its last event by more than `ZONE_STATE_IDLE_TTL_MS`
+(15 min). Zones live on twelve partitions that kafkajs drains independently, so a zone on a
+lagging partition sits permanently behind a watermark set by the leading one. If cross-partition
+skew in event time exceeds the TTL, such a zone would be evicted while its events are still
+arriving, and re-evicted on each sweep — never holding a window long enough to confirm a
+transition. The textbook fix is a per-partition watermark with the global watermark taken as the
+**minimum**, since a watermark must never advance past the slowest input.
+
+**It has not been observed.** It was the leading hypothesis for D10 and it was wrong. The first
+post-fix run, with the instrumentation added to measure exactly this, recorded **0 evictions
+across 400 zones and 1.7M+ events**: when the consumer keeps pace with the producer, skew stays
+far below the TTL. The S2b spread that made the hypothesis attractive was itself an artefact of
+segments being deleted mid-read.
+
+So it stays open rather than fixed. The argument for the minimum-watermark design is sound in
+general and the change is small, but fixing an unobserved defect is how the wrong diagnosis got
+attractive in the first place. The instrumentation is in place — per-partition high-water marks,
+per-zone eviction counts, and the widest zone lag behind the watermark are reported on every
+eviction and in the processing summary — so the next run that consumes a genuine backlog (a
+benchmark replaying a large topic from the beginning, most likely) will answer it with a number.
 
 ## 4. Target architecture (Phase 1)
 
