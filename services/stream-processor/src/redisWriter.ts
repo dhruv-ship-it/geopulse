@@ -1,7 +1,7 @@
 import { RedisClientType } from 'redis';
 import { ZoneStateData } from './types';
 import { TimeWindowManager } from './timeWindowManager';
-import { cellsFor, ZoneCells } from './spatial';
+import { ZoneCells, cellsFor } from '@geopulse/spatial';
 
 const GEO_INDEX_KEY = 'zones:geo';
 const REGISTRY_KEY = 'zones:registry';
