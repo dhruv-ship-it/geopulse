@@ -56,26 +56,48 @@ The simulator can be configured via environment variables:
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `NUM_ZONES` | 10 | Number of geographic zones to simulate |
-| `EVENTS_PER_SECOND` | 50 | Events generated per second |
 | `SCENARIO` | normal | Scenario type: normal, spike, drop |
 | `LOG_EVERY_N` | 100 | Log progress every N events |
+| `SIM_START_EPOCH_MS` | 1768478400000 | Simulated epoch the run starts at (2026-01-15T12:00:00Z) |
+| `SIM_STEP_MS` | 1000 | Simulated ms per tick; one event per zone per tick |
+| `SPEED_MULTIPLIER` | 1 | Simulated ms per real ms. 60 = a simulated minute every real second |
 | `KAFKA_BROKER` | localhost:9092 | Kafka broker address |
+
+### Simulated time
+
+Every zone reads one shared virtual clock (`src/virtualClock.ts`). Event time is a pure function
+of the tick count from `SIM_START_EPOCH_MS` — nothing on an emitted event comes from `Date.now()`
+— so a run is reproducible and two zones can never drift apart. Per-zone sensor lag is still
+applied, so events arrive out of order across zones, but it is a bounded offset (0–20 ms), not a
+rate.
+
+`SPEED_MULTIPLIER` changes how long a run takes in real time and nothing about what it contains:
+a 60x run emits exactly the same events, with exactly the same timestamps, as a 1x run. The
+stream processor needs 60 s of *event* time to confirm `STRESSED`, so 60x makes that observable
+within a second.
+
+There is no `EVENTS_PER_SECOND` any more — it conflated sampling density with simulation speed.
+The real event rate is derived:
+
+```
+events per real second = NUM_ZONES * (1000 / SIM_STEP_MS) * SPEED_MULTIPLIER
+```
 
 ### Example Configurations
 
-**High-volume normal scenario:**
+**High-volume normal scenario** (50 zones, 4 samples/simulated second → 200 events/s):
 ```bash
-NUM_ZONES=50 EVENTS_PER_SECOND=200 SCENARIO=normal npm run dev
+NUM_ZONES=50 SIM_STEP_MS=250 SCENARIO=normal npm run dev
 ```
 
-**Spike scenario for testing:**
+**Spike scenario at 60x, for watching state transitions without waiting:**
 ```bash
-NUM_ZONES=20 EVENTS_PER_SECOND=100 SCENARIO=spike npm run dev
+NUM_ZONES=20 SPEED_MULTIPLIER=60 SCENARIO=spike npm run dev
 ```
 
-**Low-volume monitoring:**
+**Low-volume monitoring** (5 zones, 2 samples/simulated second → 10 events/s):
 ```bash
-NUM_ZONES=5 EVENTS_PER_SECOND=10 SCENARIO=normal LOG_EVERY_N=50 npm run dev
+NUM_ZONES=5 SIM_STEP_MS=500 SCENARIO=normal LOG_EVERY_N=50 npm run dev
 ```
 
 ## 📊 Event Schema
@@ -246,7 +268,7 @@ sensor-simulator/
 - Verify topic creation: `kafka-topics --list`
 
 **Performance Issues:**
-- Reduce `EVENTS_PER_SECOND` 
+- Raise `SIM_STEP_MS` or lower `SPEED_MULTIPLIER` (both reduce the real event rate)
 - Decrease `NUM_ZONES`
 - Check system resources
 

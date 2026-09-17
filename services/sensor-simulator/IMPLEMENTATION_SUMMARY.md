@@ -105,7 +105,9 @@ services/sensor-simulator/
 
 Environment variables:
 - `NUM_ZONES`: Number of zones (default: 10)
-- `EVENTS_PER_SECOND`: Generation rate (default: 50)
+- `SIM_START_EPOCH_MS`: Simulated start epoch (default: 1768478400000)
+- `SIM_STEP_MS`: Simulated ms per tick (default: 1000)
+- `SPEED_MULTIPLIER`: Simulated ms per real ms (default: 1)
 - `SCENARIO`: normal|spike|drop (default: normal)
 - `LOG_EVERY_N`: Progress logging frequency (default: 100)
 - `KAFKA_BROKER`: Broker address (default: localhost:9092)
@@ -147,7 +149,7 @@ npm start
 
 **High-volume testing:**
 ```bash
-NUM_ZONES=50 EVENTS_PER_SECOND=200 npm run dev
+NUM_ZONES=50 SIM_STEP_MS=250 npm run dev
 ```
 
 **Spike scenario:**
