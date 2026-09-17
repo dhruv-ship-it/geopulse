@@ -27,6 +27,9 @@ export class KafkaEventConsumer {
 
     this.consumer = this.kafka.consumer({
       groupId: CONSUMER_GROUP,
+      // Off deliberately: subscribing to a topic that does not exist should fail loudly
+      // rather than conjure a 1-partition topic. See tools/kafka-bootstrap.
+      allowAutoTopicCreation: false,
       retry: { retries: 3 }
     });
   }

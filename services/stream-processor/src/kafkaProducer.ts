@@ -31,7 +31,9 @@ export class KafkaAlertProducer {
     });
 
     this.producer = this.kafka.producer({
-      allowAutoTopicCreation: true,
+      // Topics are created explicitly by tools/kafka-bootstrap. Auto-creation would
+      // silently produce a 1-partition topic and hide the misconfiguration.
+      allowAutoTopicCreation: false,
       transactionTimeout: 30000,
       createPartitioner: Partitioners.LegacyPartitioner
     });

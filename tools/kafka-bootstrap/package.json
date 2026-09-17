@@ -1,0 +1,21 @@
+{
+  "name": "kafka-bootstrap",
+  "version": "1.0.0",
+  "private": true,
+  "description": "GeoPulse Kafka topic bootstrap - creates topics explicitly so no service relies on auto-creation",
+  "scripts": {
+    "bootstrap": "ts-node src/bootstrap.ts",
+    "describe": "ts-node src/bootstrap.ts --describe-only"
+  },
+  "author": "GeoPulse Team",
+  "license": "MIT",
+  "dependencies": {
+    "@types/node": "^25.2.0",
+    "dotenv": "^17.2.3",
+    "kafkajs": "^2.2.4",
+    "typescript": "^5.9.3"
+  },
+  "devDependencies": {
+    "ts-node": "^10.9.2"
+  }
+}
