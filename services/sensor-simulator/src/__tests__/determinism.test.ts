@@ -47,23 +47,17 @@ describe('LoadGenerator', () => {
     baseLoad: 0.4
   };
 
-  beforeEach(() => LoadGenerator.reset());
-
   it('produces an identical load sequence for an identical input sequence', () => {
-    const run = () => {
-      LoadGenerator.reset();
-      return [0, 1000, 2000, 3000].map(
+    const run = () =>
+      [0, 1000, 2000, 3000].map(
         (offset) => LoadGenerator.generateEvent(zone, 'normal', T0 + offset).load
       );
-    };
 
     expect(run()).toEqual(run());
   });
 
   it('derives load from event time only, not from wall clock', () => {
-    LoadGenerator.reset();
     const first = LoadGenerator.generateEvent(zone, 'normal', T0).load;
-    LoadGenerator.reset();
     const second = LoadGenerator.generateEvent(zone, 'normal', T0).load;
     expect(second).toBe(first);
   });
@@ -75,9 +69,7 @@ describe('LoadGenerator', () => {
     const night = Date.UTC(2026, 0, 15, 2, 0, 0);
     const midday = Date.UTC(2026, 0, 15, 12, 0, 0);
 
-    LoadGenerator.reset();
     const nightLoad = LoadGenerator.generateEvent(zone, 'normal', night).load;
-    LoadGenerator.reset();
     const middayLoad = LoadGenerator.generateEvent(zone, 'normal', midday).load;
 
     expect(nightLoad).toBeLessThan(middayLoad);
@@ -85,7 +77,6 @@ describe('LoadGenerator', () => {
 
   it('keeps load within [0, 1] across all scenarios', () => {
     for (const scenario of ['normal', 'spike', 'drop'] as const) {
-      LoadGenerator.reset();
       for (let i = 0; i < 200; i++) {
         const { load } = LoadGenerator.generateEvent(zone, scenario, T0 + i * 1000);
         expect(load).toBeGreaterThanOrEqual(0);
@@ -95,11 +86,8 @@ describe('LoadGenerator', () => {
   });
 
   it('raises load under spike and lowers it under drop, relative to normal', () => {
-    LoadGenerator.reset();
     const normal = LoadGenerator.generateEvent(zone, 'normal', T0).load;
-    LoadGenerator.reset();
     const spike = LoadGenerator.generateEvent(zone, 'spike', T0).load;
-    LoadGenerator.reset();
     const drop = LoadGenerator.generateEvent(zone, 'drop', T0).load;
 
     expect(spike).toBeGreaterThan(normal);
@@ -107,7 +95,6 @@ describe('LoadGenerator', () => {
   });
 
   it('never emits an event timestamp ahead of the produced time', () => {
-    LoadGenerator.reset();
     for (let i = 0; i < 50; i++) {
       const producedAt = T0 + i * 1000;
       const event = LoadGenerator.generateEvent(zone, 'normal', producedAt);

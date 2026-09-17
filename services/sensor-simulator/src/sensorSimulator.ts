@@ -3,33 +3,60 @@ import { LoadGenerator } from './loadGenerator';
 import { KafkaEventProducer } from './kafkaProducer';
 import { loadConfig } from './config';
 import { ZoneConfig, SensorEvent } from './types';
+import { VirtualClock } from './virtualClock';
+import { SimulationLoop } from './simulationLoop';
 import { logger } from './logger';
 
 /**
  * Main sensor simulator orchestrator
  * Manages zone generation, event creation, and Kafka publishing
+ *
+ * Simulated time is owned by a single VirtualClock shared by every zone; SimulationLoop decides
+ * how fast that clock runs against the wall clock. Nothing on an emitted event comes from
+ * `Date.now()` — see virtualClock.ts for why.
  */
 export class SensorSimulator {
   private config = loadConfig();
   private zones: ZoneConfig[] = [];
   private kafkaProducer: KafkaEventProducer;
+  private clock: VirtualClock;
+  private loop: SimulationLoop;
   private isRunning: boolean = false;
   private eventCounter: number = 0;
   private startTime: number = 0;
 
   constructor() {
     this.kafkaProducer = new KafkaEventProducer();
+    this.clock = new VirtualClock({
+      startEpochMs: this.config.startEpochMs,
+      stepMs: this.config.stepMs,
+      speedMultiplier: this.config.speedMultiplier
+    });
+    this.loop = new SimulationLoop(this.clock, (stepTimes) => this.emitSteps(stepTimes));
   }
 
   /**
    * Initialize the simulator
    */
   async initialize(): Promise<void> {
-    logger.info({ numberOfZones: this.config.numberOfZones, eventsPerSecond: this.config.eventsPerSecond, scenario: this.config.scenario, logEveryNEvents: this.config.logEveryNEvents }, 'Initializing GeoPulse Sensor Simulator');
+    logger.info({ numberOfZones: this.config.numberOfZones, scenario: this.config.scenario, logEveryNEvents: this.config.logEveryNEvents }, 'Initializing GeoPulse Sensor Simulator');
 
     // Generate zones
     this.zones = ZoneGenerator.generateZones(this.config.numberOfZones);
     logger.info({ zoneCount: this.zones.length }, 'Generated zones with geographic distribution');
+
+    logger.info(
+      {
+        startEpoch: new Date(this.clock.startEpochMs).toISOString(),
+        stepMs: this.clock.stepMs,
+        speedMultiplier: this.clock.speedMultiplier,
+        realTickIntervalMs: Number(this.clock.realTickIntervalMs.toFixed(3)),
+        stepsPerRealTick: this.clock.stepsPerRealTick,
+        eventsPerRealSecond: Math.round(this.clock.eventsPerRealSecond(this.zones.length)),
+        maxSensorLagMs: LoadGenerator.MAX_SENSOR_LAG_MS
+      },
+      'Virtual clock configured — event time is simulated, not wall clock'
+    );
 
     // Connect to Kafka
     await this.kafkaProducer.connect();
@@ -49,19 +76,8 @@ export class SensorSimulator {
 
     this.isRunning = true;
     logger.info('Starting sensor simulation');
-    
-    // Calculate interval based on events per second
-    const intervalMs = 1000 / this.config.eventsPerSecond;
-    
-    // Start the event generation loop
-    const intervalId = setInterval(() => {
-      if (!this.isRunning) {
-        clearInterval(intervalId);
-        return;
-      }
-      
-      this.generateAndSendEvents();
-    }, intervalMs);
+
+    this.loop.start();
 
     // Handle graceful shutdown
     process.on('SIGINT', async () => {
@@ -87,26 +103,39 @@ export class SensorSimulator {
 
     logger.info('Stopping sensor simulation');
     this.isRunning = false;
+    this.loop.stop();
     
     await this.kafkaProducer.disconnect();
     
     const duration = (Date.now() - this.startTime) / 1000;
     const rate = this.eventCounter / duration;
-    logger.info({ duration, totalEvents: this.eventCounter, averageRate: rate }, 'Simulation summary');
+    logger.info(
+      {
+        duration,
+        totalEvents: this.eventCounter,
+        averageRate: rate,
+        simulatedSeconds: this.clock.elapsedMs / 1000,
+        simulatedNow: new Date(this.clock.now()).toISOString()
+      },
+      'Simulation summary'
+    );
   }
 
   /**
-   * Generate and send events for current time slice
+   * Emit one event per zone for each simulated step in this firing, then publish the batch.
+   *
+   * At high speed multipliers a single firing covers several steps; batching their events into
+   * one Kafka send keeps the producer call rate bounded while the event stream stays identical
+   * to what a 1x run would produce.
    */
-  private async generateAndSendEvents(): Promise<void> {
-    const producedAt = Date.now();
+  private async emitSteps(stepTimes: number[]): Promise<void> {
     const events: SensorEvent[] = [];
 
-    // Generate one event per zone
-    for (const zone of this.zones) {
-      const event = LoadGenerator.generateEvent(zone, this.config.scenario, producedAt);
-      events.push(event);
-      this.eventCounter++;
+    for (const simNow of stepTimes) {
+      for (const zone of this.zones) {
+        events.push(LoadGenerator.generateEvent(zone, this.config.scenario, simNow));
+        this.eventCounter++;
+      }
     }
 
     try {
@@ -114,8 +143,8 @@ export class SensorSimulator {
       await this.kafkaProducer.sendEvents(events);
       
       // Log progress
-      if (this.eventCounter % this.config.logEveryNEvents === 0) {
-        this.logProgress(events[0]);
+      if (this.eventCounter % this.config.logEveryNEvents < events.length) {
+        this.logProgress(events[events.length - 1]);
       }
     } catch (error) {
       logger.error({ error }, 'Error sending events');
@@ -129,10 +158,20 @@ export class SensorSimulator {
     const duration = (Date.now() - this.startTime) / 1000;
     const rate = (this.eventCounter / duration).toFixed(1);
     
-    logger.info({ eventCount: this.eventCounter, rate, zoneId: sampleEvent.zoneId, load: sampleEvent.load }, 'Simulation progress');
+    logger.info(
+      {
+        eventCount: this.eventCounter,
+        rate,
+        zoneId: sampleEvent.zoneId,
+        load: sampleEvent.load,
+        eventTime: new Date(sampleEvent.eventTimestamp).toISOString(),
+        simulatedSeconds: this.clock.elapsedMs / 1000
+      },
+      'Simulation progress'
+    );
     
     // Log zone distribution info periodically
-    if (this.eventCounter % (this.config.logEveryNEvents * 10) === 0) {
+    if (this.eventCounter % (this.config.logEveryNEvents * 10) < 1) {
       this.logZoneSummary();
     }
   }
