@@ -9,27 +9,43 @@ const KAFKA_BROKER = process.env.KAFKA_BROKER || 'localhost:9092';
 const ALERTS_TOPIC = 'zone.alerts';
 const CONSUMER_GROUP = 'alert-processor';
 
+export interface AlertConsumerOptions {
+  policy?: RetryPolicy;
+  /** Overridable so an integration test can use a throwaway group and not move production offsets. */
+  groupId?: string;
+  topic?: string;
+  dlqTopic?: string;
+  fromBeginning?: boolean;
+}
+
 export class KafkaAlertConsumer {
   private kafka: Kafka;
   private consumer: Consumer;
   private deadLetterProducer: KafkaDeadLetterProducer;
   private isConnected: boolean = false;
   private messageHandler: ((alert: ZoneAlert) => Promise<void>) | null = null;
+  private policy: RetryPolicy;
+  private topic: string;
+  private fromBeginning: boolean;
 
-  constructor(private policy: RetryPolicy = DEFAULT_RETRY_POLICY) {
+  constructor(options: AlertConsumerOptions = {}) {
+    this.policy = options.policy ?? DEFAULT_RETRY_POLICY;
+    this.topic = options.topic ?? ALERTS_TOPIC;
+    this.fromBeginning = options.fromBeginning ?? true;
+
     this.kafka = new Kafka({
       clientId: 'alert-processor',
       brokers: [KAFKA_BROKER]
     });
 
     this.consumer = this.kafka.consumer({
-      groupId: CONSUMER_GROUP,
+      groupId: options.groupId ?? CONSUMER_GROUP,
       // Off deliberately: subscribing to a topic that does not exist should fail loudly
       // rather than conjure a 1-partition topic. See tools/kafka-bootstrap.
       allowAutoTopicCreation: false
     });
 
-    this.deadLetterProducer = new KafkaDeadLetterProducer(this.kafka);
+    this.deadLetterProducer = new KafkaDeadLetterProducer(this.kafka, options.dlqTopic);
   }
 
   async connect(): Promise<void> {
@@ -38,9 +54,9 @@ export class KafkaAlertConsumer {
     // Connect the DLQ before consuming: if we cannot dead-letter, we cannot safely commit
     // after a failure, and it is better to find that out at startup.
     await this.deadLetterProducer.connect();
-    await this.consumer.subscribe({ topic: ALERTS_TOPIC, fromBeginning: true });
+    await this.consumer.subscribe({ topic: this.topic, fromBeginning: this.fromBeginning });
     this.isConnected = true;
-    logger.info({ broker: KAFKA_BROKER, topic: ALERTS_TOPIC, group: CONSUMER_GROUP }, 'Kafka consumer connected');
+    logger.info({ broker: KAFKA_BROKER, topic: this.topic }, 'Kafka consumer connected');
   }
 
   async disconnect(): Promise<void> {
