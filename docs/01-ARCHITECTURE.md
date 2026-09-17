@@ -100,6 +100,7 @@ before/after measurement. WP2 is no longer blocked.**
 | D8 ✅ | **Simulator event clock did not track real time, and every zone's clock ran at a different rate.** Event time advanced by a per-event constant, not by elapsed time, so it ran at 0.5–10% of wall clock and zones diverged 20× from each other. | `sensor-simulator/src/loadGenerator.ts` | Blocked WP2: adjacent zones could never appear to degrade "at the same time", which is the entire premise of spatial correlation. Closed in S2a by a shared virtual clock — see §3.2 and `docs/adr/ADR-005-simulated-event-time.md`. |
 | D7 ✅ | **Simulator load depends on the host timezone.** `LoadGenerator.addRealisticVariation` read the time-of-day pattern with `Date#getHours()`, which is host-local. The same event timestamp produced a different load in a different timezone, or either side of a DST change. | `sensor-simulator/src/loadGenerator.ts` | Found while writing the WP0 determinism tests. Directly breaks the "simulator is deterministic" property that replay and every measured number rest on. Now `getUTCHours()`. |
 | D9 ✅ | **Zones were too far apart to have neighbours.** The fibonacci-spiral layout spreads zones over the whole planet: the closest pair anywhere is 160 km apart at 5000 zones, and *zero* pairs fall within an H3 res-5 one-ring neighbourhood at any zone count the project runs at. | `sensor-simulator/src/zoneGenerator.ts` | Found in S2b while building the eval scenarios. A regional anomaly would have covered exactly one zone, every connected component would have been a singleton, and the collapse ratio would have been zero — the correlation engine would have measured as broken while being correct. Closed by the `regional-grid` layout; evidence in `benchmarks/results/d9-zone-spacing.txt`, see §3.3. |
+| D10 ⬜ | **The live pipeline produces zero degradations from a stream that provably should degrade.** A 400-zone `regional-anomaly` run put 5.76M events through Kafka; all were consumed (lag 0 on every partition), all 400 zones registered in Redis — and the state machine emitted **nothing**, leaving every zone at `avg1m = avg5m = 0` with `lastEventTime` set. | `stream-processor/src/` — component not yet identified | **Blocks WP6b.** Replaying the identical events through the same `TimeWindowManager` and `StateMachine` in per-zone order transitions all 62 labelled zones to STRESSED and 47 to CRITICAL (`benchmarks/results/wp6a-degradation-check.txt`), so the events are not the problem — the consumption path is. Mechanism not yet established; see §3.4. |
 
 ### 3.2 D8 — the simulator's event clock did not track real time (CLOSED in S2a)
 
@@ -233,6 +234,68 @@ Base loads are drawn i.i.d. from the seeded PRNG in this layout rather than from
 `index % 7` pattern. On a grid, an index-modulo pattern lays down diagonal stripes of
 high-baseline zones — spatially correlated baseline load, which is exactly the structure the
 correlation engine is supposed to find only when an anomaly put it there.
+
+
+### 3.4 D10 — the live pipeline emits no degradations (OPEN, blocks WP6b)
+
+Found in S2b while verifying that the WP6a anomaly injection is calibrated against the real
+state machine.
+
+**What was run.** `SCENARIO=regional-anomaly NUM_ZONES=400 SEED=42 SPEED_MULTIPLIER=3600`, four
+simulated hours, against the live stack. The simulator produced 5,760,000 events and stopped
+itself at the planned end.
+
+**What was observed.**
+
+| Signal | Value |
+|---|---|
+| Consumer lag, all 12 partitions | 0 — everything was consumed |
+| Zones in `zones:registry` | 400 — the processor saw and registered every zone |
+| `zone.degradations` messages | **0** |
+| `zone:Z-90` after the run | `state=NORMAL`, `avg1m=0`, `avg5m=0`, `lastEventTime` set and inside the run |
+| `lastEventTime` spread across zones | ~22 minutes |
+
+**Why this is not a simulator defect.** Replaying the identical event stream through the
+stream-processor's own `TimeWindowManager` and `StateMachine`, in per-zone order, with no broker
+involved:
+
+| Scenario | Labelled zones | Reached STRESSED | Reached CRITICAL | Median lag from labelled onset |
+|---|---|---|---|---|
+| `regional-anomaly` | 62 | 62 | 47 | 256 s |
+| `propagating-anomaly` | 57 | 57 | 46 | 291 s |
+| `multi-anomaly` | 43 | 43 | 34 | 258 s |
+| `noise` | 16 | 16 | 16 | 260 s |
+
+Plus a control: 40 zones the ground truth leaves out produce **0** transitions. Raw output in
+`benchmarks/results/wp6a-degradation-check.txt`, re-runnable via
+`benchmarks/anomaly-degradation-check.ts`.
+
+So the events carry exactly the loads the labels claim, and those loads clear the real state
+machine's thresholds with room to spare. Something between "consumed from Kafka" and "evaluated"
+is losing them.
+
+**Lead, not yet a diagnosis.** `ZoneStateStore` evicts a zone when the watermark — the highest
+event time seen across *all* zones — has moved more than `ZONE_STATE_IDLE_TTL_MS` (15 min) past
+that zone's own last event. With 12 partitions consumed concurrently, one partition runs ahead of
+another, so zones on a lagging partition are evicted as "idle" while their events are still
+arriving, and eviction discards their windows. The observed ~22-minute spread in `lastEventTime`
+exceeds the TTL, and the reproduction confirms the evictions happen: 7,230 at 20 minutes of
+simulated skew, 19,280 at 45 minutes.
+
+**But that does not close it.** An evicted zone rebuilds its five-minute window within five
+simulated minutes and still crosses the threshold — peak `avg5m` stays above 0.75 in every
+skew row measured. Eviction alone therefore cannot produce `avg5m = 0`. Something further is
+needed: repeated eviction at a cadence shorter than the window, an interaction with D3's
+eviction-on-incoming-timestamp in `TimeWindowManager`, or a factor not yet probed.
+
+This is recorded as an open lead rather than a closed defect on purpose. The tempting move was to
+write down the first plausible mechanism and move on; it was tested, and it does not account for
+what was seen.
+
+**Why it blocks WP6b.** The eval harness scores incidents against ground truth. With zero
+degradations there are no incidents, so every scenario would report a collapse ratio of zero and
+recall of zero — indistinguishable from a correlation engine that does not work. No number taken
+before this is fixed means anything.
 
 
 ## 4. Target architecture (Phase 1)

@@ -1,0 +1,61 @@
+GeoPulse benchmark: WP6a anomaly -> degradation check
+generated: 2026-09-17T16:58:19Z
+commit:    b81dbff
+node:      v20.14.0
+command:   cd services/stream-processor && npx ts-node -O '{"module":"commonjs","esModuleInterop":true,"target":"ES2020"}' ../../benchmarks/anomaly-degradation-check.ts
+
+WP6a: does an injected anomaly degrade the real state machine?
+zones: 400 (regional-grid)   seed: 42   run: 4h simulated
+components under replay: stream-processor TimeWindowManager + StateMachine
+
+Part 1 — per-zone ordered replay
+--------------------------------------------------------------------------------------------
+scenario              labelled  reached   reached   first STRESSED   median lag from
+                         zones  STRESSED  CRITICAL   (worst zone)     labelled onset
+--------------------------------------------------------------------------------------------
+regional-anomaly            62        62        47   2026-01-15T12:42:37.993Z 256s
+propagating-anomaly         57        57        46   2026-01-15T15:45:53.981Z 291s
+multi-anomaly               43        43        34   2026-01-15T13:18:37.993Z 258s
+noise                       16        16        16   2026-01-15T14:31:53.989Z 260s
+
+control: 40 unlabelled zones, regional-anomaly -> 0 transitions (expected 0)
+
+The lag from labelled onset to STRESSED is the detection floor described in 03-MEASUREMENT.md §3.3:
+  the five-minute average has to fill before it can cross 0.75, then the transition has to survive
+  a sixty-second confirmation. No correlation layer can beat it, and quoting a TTD that did would be a
+  sign of a measurement error rather than a fast system.
+
+Part 2 — the same events with cross-partition skew (defect D10)
+--------------------------------------------------------------------------------------------
+A live run of exactly this configuration produced ZERO degradations from 5.76M events, with
+every zone left at avg1m = avg5m = 0. Part 1 says the events are fine, so the loss is in how
+they are consumed. This reproduces it without a broker.
+
+ZoneStateStore evicts a zone when the watermark — the highest event time seen across ALL
+zones — has moved more than the idle TTL past that zone's own last event. With 12 partitions
+consumed concurrently, one partition can run far ahead of another, so zones on a lagging
+partition are evicted as "idle" while their events are still arriving.
+
+  skew  0 min ->      0 evictions, peak avg5m 0.955 (degrades)
+  skew  5 min ->      0 evictions, peak avg5m 0.955 (degrades)
+  skew 20 min ->   7230 evictions, peak avg5m 0.970 (degrades)
+  skew 45 min ->  19280 evictions, peak avg5m 0.970 (degrades)
+
+  idle TTL: 15 min. Skew beyond it evicts zones mid-stream.
+
+  Eviction under skew is real and substantial. It is NOT on its own an explanation for the
+  live result: an evicted zone refills its five-minute window within five simulated minutes
+  and still crosses the threshold, which is why peak avg5m stays above 0.75 in every row
+  above. Whatever produced avg5m = 0 on the live run needs something further — most likely
+  repeated eviction at a cadence shorter than the window, or a second factor not probed here.
+  Reported as a lead, not as a diagnosis.
+
+Verdict
+--------------------------------------------------------------------------------------------
+Part 1 PASSED — every labelled zone reaches STRESSED, no unlabelled zone transitions.
+  WP6a is therefore done: the labels are calibrated against the real state machine, not only
+  against what the simulator alone considers a degrading load.
+
+Part 2 INCONCLUSIVE — eviction under skew is demonstrated, but does not account for the live
+zero on its own. D10 stays open with the mechanism unestablished. It is a stream-processor
+defect, not a simulator one, and it blocks WP6b: there is nothing to score until it is fixed.
