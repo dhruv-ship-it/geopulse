@@ -49,9 +49,14 @@ describe('CorrelationWindow — admission', () => {
   });
 
   it('rejects an eventTime that is not a finite number', () => {
+    // A NaN event time would silently poison every comparison it touches: NaN <= x is false, so
+    // the member would simply never expire. Loud beats quiet.
     const w = windowOf(60000);
     expect(() => w.admit('Z-1', Number.NaN)).toThrow(/finite/);
     expect(() => w.admit('Z-1', Number.POSITIVE_INFINITY)).toThrow(/finite/);
+    expect(() => w.release('Z-1', Number.NaN)).toThrow(/finite/);
+    expect(() => w.tick(Number.NaN)).toThrow(/finite/);
+    expect(() => w.sweep(Number.NaN)).toThrow(/finite/);
   });
 });
 
@@ -233,6 +238,15 @@ describe('CorrelationWindow — configuration and determinism', () => {
 
   it('rejects a negative compaction interval', () => {
     expect(() => new CorrelationWindow({ compactionIntervalMs: -1 })).toThrow(/non-negative/);
+  });
+
+  it('falls back to the documented CORRELATION_WINDOW_MS / COMPACTION_INTERVAL_MS defaults', () => {
+    // 01-ARCHITECTURE.md section 7. The service passes these from env; the defaults are what a
+    // bare construction gets, and they must stay in step with the doc.
+    expect(new CorrelationWindow().geometry).toEqual({
+      windowMs: 120000,
+      compactionIntervalMs: 5000
+    });
   });
 
   it('exposes the geometry it is working to', () => {

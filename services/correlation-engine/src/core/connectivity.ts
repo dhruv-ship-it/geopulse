@@ -77,6 +77,9 @@ export interface Connectivity {
  */
 export function canonicalise(components: string[][]): string[][] {
   const sorted = components.map((component) => [...component].sort());
+  // Plain `<` / `>`, not localeCompare: collation depends on locale and ICU build, and this
+  // ordering is what WP2b will derive incident ids from. The equal case cannot arise for a
+  // genuine partition — components are disjoint, so no two share a first member.
   sorted.sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0));
   return sorted;
 }

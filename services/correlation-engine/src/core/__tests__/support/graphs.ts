@@ -6,8 +6,8 @@ import { AdjacencyProvider } from '../../connectivity';
  * The connectivity structures take an `AdjacencyProvider` rather than a `NeighbourGraph` so
  * that tests can state the topology they want to exercise directly — a path, a ring, a star, a
  * random graph — instead of hunting for coordinates whose H3 cells happen to produce it. The
- * real `NeighbourGraph` is exercised against these structures separately, in
- * `h3Adjacency.test.ts`.
+ * real `NeighbourGraph` is driven through the same structures separately, in the H3 half of
+ * `differentialFuzz.test.ts`.
  *
  * Edges are stored as a **symmetric** closure, because that is the documented contract on
  * `AdjacencyProvider` and a test fixture that quietly violated it would be testing something
@@ -54,7 +54,10 @@ export class StaticAdjacency implements AdjacencyProvider {
         }
       }
     }
-    out.sort((x, y) => (x[0] === y[0] ? x[1].localeCompare(y[1]) : x[0].localeCompare(y[0])));
+    // Plain comparison, not localeCompare: collation is locale- and ICU-dependent, and a test
+    // helper whose ordering varies by machine is the last place to introduce that.
+    const cmp = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0);
+    out.sort((x, y) => (x[0] === y[0] ? cmp(x[1], y[1]) : cmp(x[0], y[0])));
     return out;
   }
 
