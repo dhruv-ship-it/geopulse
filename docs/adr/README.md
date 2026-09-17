@@ -27,3 +27,4 @@ separates a defended decision from an arbitrary one.
 | ADR-002 | Time-aware connectivity strategy | WP2 |
 | ADR-003 | Incident identity, merge and split semantics | WP2 |
 | ADR-004 | Partitioning on coarse H3 cells | WP3 |
+| ADR-005 | Simulated event time: one virtual clock, bounded per-zone lag, adjustable speed | WP6a ✅ |
