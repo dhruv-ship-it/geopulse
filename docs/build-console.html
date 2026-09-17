@@ -239,7 +239,7 @@ code,pre,.mono{font-family:"IBM Plex Mono",ui-monospace,Menlo,Consolas,monospace
 @media(prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
 </style>
 
-<script id="app-state" type="application/json">{"done":[]}</script>
+<script id="app-state" type="application/json">{"done":["S1"]}</script>
 
 <div class="wrap">
   <header class="masthead">
@@ -317,11 +317,22 @@ Priorities and gotchas:
 
 Commit incrementally as you go (one commit per defect fix is about right), no Claude co-author
 trailers. Update docs/STATUS.md when done: WP0 status, D1/D2/D4/D5 marked closed.`,
-m:`<p>Bring the stack up and confirm the topics were created with real partition counts:</p>
+m:`<p><span class="flag">Verification gate — do this before S2</span></p>
+<p>Your existing topics were auto-created with <strong>1 partition</strong>, and <code>createTopics</code> will not resize them. Delete first or the bootstrap silently does nothing:</p>
 <pre>cd infra &amp;&amp; docker-compose up -d
-cd services/stream-processor &amp;&amp; npm run bootstrap-topics
-docker exec geopulse-kafka kafka-topics --bootstrap-server localhost:9092 --describe</pre>
-<p><code>raw.zone.events</code>, <code>zone.degradations</code> and <code>zone.incidents</code> should each show <strong>12 partitions</strong>. Then run <code>npm test</code> in every service.</p>`},
+
+docker exec geopulse-kafka kafka-topics --bootstrap-server localhost:9092 \\
+  --delete --topic raw.zone.events
+docker exec geopulse-kafka kafka-topics --bootstrap-server localhost:9092 \\
+  --delete --topic zone.alerts
+
+cd tools/kafka-bootstrap &amp;&amp; npm install &amp;&amp; npm run bootstrap
+docker exec geopulse-kafka kafka-topics --bootstrap-server localhost:9092 \\
+  --describe --topic raw.zone.events
+# expect: PartitionCount: 12
+
+cd services/alert-processor &amp;&amp; GEOPULSE_INTEGRATION=1 npm test</pre>
+<p>The integration suite is the <strong>only</strong> coverage the D1 retry/DLQ wiring has — unit coverage of it is 0%. Until it runs green, "alerts are never silently lost" describes code that has never executed.</p>`},
 
 {id:"S2",wp:"WP6a",t:"Simulator ground truth",est:"45–60m",stage:0,
 p:`Read docs/STATUS.md, then docs/03-MEASUREMENT.md, then docs/02-PHASE-1-CORRELATION.md WP6a.

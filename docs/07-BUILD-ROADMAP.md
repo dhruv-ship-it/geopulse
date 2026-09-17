@@ -118,15 +118,23 @@ Commit incrementally as you go (one commit per defect fix is about right), no Cl
 trailers. Update docs/STATUS.md when done: WP0 status, D1/D2/D4/D5 marked closed.
 ```
 
-**Manual afterwards:**
+**Manual afterwards** (actual commands, as built in S1):
 ```bash
 cd infra && docker-compose up -d
-# then whatever bootstrap command the session created, e.g.:
-cd services/stream-processor && npm run bootstrap-topics
-docker exec geopulse-kafka kafka-topics --bootstrap-server localhost:9092 --describe
+
+# topics from the original build were auto-created with 1 partition, and createTopics
+# will NOT resize an existing topic. Delete them first or the bootstrap silently no-ops.
+docker exec geopulse-kafka kafka-topics --bootstrap-server localhost:9092 --delete --topic raw.zone.events
+docker exec geopulse-kafka kafka-topics --bootstrap-server localhost:9092 --delete --topic zone.alerts
+
+cd tools/kafka-bootstrap && npm install && npm run bootstrap
+docker exec geopulse-kafka kafka-topics --bootstrap-server localhost:9092 --describe --topic raw.zone.events
+# expect: PartitionCount: 12
+
+cd services/alert-processor && GEOPULSE_INTEGRATION=1 npm test
 ```
-Confirm `raw.zone.events`, `zone.degradations`, `zone.incidents` each show **12 partitions**.
-Then `npm test` in each service.
+Confirm 12 partitions, and that the integration suite goes green. Both are verification gates
+(§8) — the next work package does not start until they pass.
 
 ---
 
