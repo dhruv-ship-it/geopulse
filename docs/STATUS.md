@@ -10,10 +10,10 @@
 | Field | Value |
 |---|---|
 | **Phase** | Phase 1 — Spatiotemporal Incident Correlation |
-| **Active work package** | WP0 — ☑ done, all four acceptance criteria verified against the live stack |
+| **Active work package** | S2a done — D8 closed and the simulator event clock rebuilt. WP1 and WP2 are both open. |
 | **Last updated** | 2026-09-17 |
-| **Last commit at time of writing** | `1d83864` |
-| **Blocked on** | Nothing for WP1. **WP2 is blocked by D8** (simulator event clock) — see below. |
+| **Last commit at time of writing** | `aceb776` |
+| **Blocked on** | Nothing. **D8 is closed, so WP2 is unblocked.** |
 
 **Decisions locked in (do not re-litigate without the owner):**
 - Scope is idea ① (spatial correlation) only. Ideas ②–⑤ are deferred to `06-FUTURE-PHASES.md`.
@@ -30,11 +30,11 @@
 |---|---|---|---|
 | WP0 | Foundation & defect cleanup | ☑ Done | D1, D2, D4, D5 closed, plus D7. D3 deferred as planned. All four acceptance criteria verified against live Kafka/Redis/Postgres. Understanding checkpoint still owed. |
 | WP1 | Spatial layer (H3 neighbour graph) | ☐ Not started | |
-| WP2 | Correlation core (time-aware connectivity) | ☐ Not started | **The deep one.** Budget the most time here. **Blocked by D8** — fix the simulator event clock (WP6a) first. |
+| WP2 | Correlation core (time-aware connectivity) | ☐ Not started | **The deep one.** Budget the most time here. Was blocked by D8; unblocked as of S2a. |
 | WP3 | `correlation-engine` service | ☐ Not started | |
 | WP4 | Propagation vector | ☐ Not started | |
 | WP5 | API + live map UI | ☐ Not started | |
-| WP6a | Simulator ground truth | ☐ Not started | Can run in parallel with WP1. **Now carries D8** — pull it forward to before WP2. |
+| WP6a | Simulator ground truth | ◐ In progress | The event-time model landed in S2a (virtual clock, D8 closed, ADR-005). The anomaly-injection scenarios and ground-truth emission are still to do — that is S2b. |
 | WP6b | Eval harness + benchmarks | ☐ Not started | |
 | WP7 | Docs, ADRs, README, resume | ☐ Not started | |
 
@@ -67,6 +67,7 @@ truly complete when both are ticked.
 | ADR-002 | Time-aware connectivity strategy | ☐ Not written |
 | ADR-003 | Incident identity, merge and split semantics | ☐ Not written |
 | ADR-004 | Partitioning on coarse H3 cells | ☐ Not written |
+| ADR-005 | Simulated event time: virtual clock, bounded lag, speed multiplier | ☑ Written (S2a) |
 
 ---
 
@@ -80,6 +81,9 @@ truly complete when both are ticked.
 | Test coverage, stream-processor | 38.39% stmts | whole src tree | `benchmarks/results/wp0-coverage.txt` | 2026-09-17 |
 | Test coverage, alert-processor | 47.08% stmts | whole src tree, integration suite skipped | `benchmarks/results/wp0-coverage.txt` | 2026-09-17 |
 | Test coverage, api | 19.17% stmts | whole src tree | `benchmarks/results/wp0-coverage.txt` | 2026-09-17 |
+| Simulator event-time rate | 1.000× real time | 20 zones, `SIM_STEP_MS=1000`, `SPEED_MULTIPLIER=1` | `benchmarks/results/d8-simulator-event-clock-after.txt` | 2026-09-17 |
+| Zone-to-zone event-time divergence | 0 ms over 60 s (spread bounded at ≤ 20 ms) | as above; was 5681 ms before the fix | `benchmarks/results/d8-simulator-event-clock-after.txt` | 2026-09-17 |
+| Wall clock per 60 s confirmation window | 60.00 s at 1×, 1.00 s at 60× | as above | `benchmarks/results/d8-simulator-event-clock-after.txt` | 2026-09-17 |
 
 Re-run with `./benchmarks/run-coverage.sh`. These are low and they are honest — the previous
 "90%+" figure was scoped to two hand-picked files. **Do not put a coverage number on the resume**
@@ -100,13 +104,40 @@ Tracked from `01-ARCHITECTURE.md` §3.
 | D5 | Unbounded zone state maps | ☑ Closed — `f2ace62` |
 | D6 | Zookeeper-mode Kafka (KRaft is current) | ☐ Open (Phase 6) |
 | D7 | Simulator load depends on host timezone (`getHours()` not `getUTCHours()`) | ☑ Closed — `7fa7e0a`. **New**, found while writing the determinism tests. |
-| D8 | Simulator event clock runs at 0.5–10% of real time and each zone's clock runs at a different rate (20× spread in 60s) | ⛔ **Open — blocks WP2.** New, found in live verification. Evidence: `benchmarks/results/d8-simulator-event-clock.txt`, analysis in `01-ARCHITECTURE.md` §3.2. Fix belongs to WP6a. |
+| D8 | Simulator event clock runs at 0.5–10% of real time and each zone's clock runs at a different rate (20× spread in 60s) | ☑ Closed — S2a. One shared virtual clock; per-zone lag is now a bounded offset. Before/after: `benchmarks/results/d8-simulator-event-clock.txt` vs `-after.txt`; rationale in `docs/adr/ADR-005-simulated-event-time.md`. |
 
 ---
 
 ## Session log
 
 Append one entry per working session. Newest at the top. Keep to 2–4 lines.
+
+### 2026-09-17 — S2a: D8 (simulator event clock) + infra hardening
+- **D8 closed.** Replaced the per-zone event-time accumulator with one `VirtualClock` shared by
+  every zone: simulated time is a pure function of the tick count from a fixed epoch, so zones
+  cannot drift. Per-zone sensor lag stays — the consumer should face out-of-order arrival — but
+  as a bounded offset (0–20 ms, hashed from the zone id), never a rate.
+- Added `SPEED_MULTIPLIER` (simulated ms per real ms). A 60× run emits byte-identical events with
+  identical timestamps to a 1× run, in a sixtieth of the wall clock. `SimulationLoop` owns the
+  only wall-clock read left in the simulator and uses it purely to pace, against absolute
+  deadlines so timer rounding cannot accumulate.
+- Event ids are now v5 (name-based) UUIDs over `zoneId:eventTimestamp`. `uuidv4()` made two runs
+  of the same scenario differ byte for byte, which defeated the point of a deterministic
+  simulator. `EVENTS_PER_SECOND` removed — see `01-ARCHITECTURE.md` §7.2.
+- **Verified live at 60×**: all ten zones reached `STRESSED` within a **17 ms** spread of event
+  time, ~2.5 s after the simulator started. WP0's run produced zero transitions in 120 s. 19 rows
+  landed in Postgres and the zone registry populated, all through password-authenticated Redis.
+- Wrote `docs/adr/ADR-005-simulated-event-time.md` (alternatives rejected, costs accepted).
+- **Infra hardening.** `geopulse-redis` now requires a password (`--requirepass`, dev credential
+  `geopulse-dev`) and every service authenticates, so a service that reaches another project's
+  Redis fails `AUTH` instead of silently sharing its keyspace — verified against `creavo_redis`.
+  Host ports moved: **Redis 6380 → 6390, Postgres 5432 → 5434**. Not 5433 as planned: that is
+  taken too (`entrance-ug-postgres`), which is the argument for the password rather than the port
+  move. Both clients log their resolved target at startup.
+- `infra_postgres_data` is clean — `zone_alerts` was empty before this session's run, so the 21
+  February rows noted in S1 are gone.
+- **Next:** S2b (WP6a scenarios + ground truth), or WP1 (spatial layer). Both are open; WP2 is
+  unblocked whenever WP1 lands. Owner still owes the WP0 understanding checkpoint.
 
 ### 2026-09-17 — WP0: foundation and defect cleanup (S1)
 - Closed D1 (silent alert loss: retry + backoff + `zone.degradations.dlq`, exception now
@@ -147,14 +178,10 @@ ones that never transition; the real `alert-processor` service retried a poisone
 
 **Local environment note.** Ports 5432 and 6380 were already taken by other projects
 (`entrance_ug_db`, `creavo_redis`), so verification ran with a temporary port override
-(Redis 6381, Postgres 5434). `infra/docker-compose.yml` is unchanged and still asks for
-5432/6380, so a plain `docker-compose up -d` will fail on those two services until the conflict
-is resolved. **`creavo_redis` on 6380 is a live hazard**: it occupies the exact port GeoPulse
-defaults to, so a service started while it is up and `geopulse-redis` is down will silently read
-and write another project's Redis.
-
-Also note `infra_postgres_data` still holds 21 `zone_alerts` rows from February 2026. Drop the
-volume before any measured run.
+(Redis 6381, Postgres 5434), and `creavo_redis` on 6380 was a live hazard: a GeoPulse service
+started while `geopulse-redis` was down read and wrote another project's Redis with no error
+anywhere. **Both resolved in S2a** — Redis 6390 with a required password, Postgres 5434, and
+`docker-compose up -d` now brings the whole stack up as committed.
 
 ### 2026-09-17 — Build roadmap and git rules
 - Added git rules 7–10 to `CLAUDE.md`: commit incrementally throughout a session, author as the
