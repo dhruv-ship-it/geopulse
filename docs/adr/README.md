@@ -1,0 +1,28 @@
+# Architecture Decision Records
+
+One short record per decision that had a real alternative. Format:
+
+```
+# ADR-00N — Title
+## Status
+Accepted | Superseded by ADR-00M
+## Context
+What problem forced a decision.
+## Decision
+What we chose.
+## Alternatives considered
+Each one, and the specific reason it lost.
+## Consequences
+What this costs us, including what it makes harder later.
+```
+
+These are interview preparation as much as documentation. The "Alternatives considered"
+section is the most important one — being able to name what you rejected and why is what
+separates a defended decision from an arbitrary one.
+
+| ADR | Title | Written in |
+|---|---|---|
+| ADR-001 | H3 vs geohash vs k-d tree | WP1 |
+| ADR-002 | Time-aware connectivity strategy | WP2 |
+| ADR-003 | Incident identity, merge and split semantics | WP2 |
+| ADR-004 | Partitioning on coarse H3 cells | WP3 |
