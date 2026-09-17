@@ -87,6 +87,9 @@ Phase 1 adds **H3** (`h3-js`) for hex-grid spatial indexing.
 infra/                       docker-compose (kafka, zookeeper, redis, postgres)
 tools/
   kafka-bootstrap/           explicit topic creation (partition counts, DLQ retention)
+packages/
+  spatial/                   [PHASE 1] @geopulse/spatial - H3 cells + NeighbourGraph,
+                             shared by stream-processor and the correlation engine
 services/
   sensor-simulator/          synthetic event generation -> Kafka
   stream-processor/          per-zone windows + state machine -> Redis, Kafka
@@ -104,11 +107,17 @@ evals/                       [PHASE 1 - NEW] ground-truth eval harness + results
 ```bash
 cd infra && docker-compose up -d                        # start kafka/redis/postgres
 cd tools/kafka-bootstrap && npm install && npm run bootstrap   # create topics (run once, after compose)
+cd packages/spatial && npm install                      # builds dist/ via prepare; do this first
 cd services/<svc> && npm install && npm run dev
 cd services/<svc> && npm test                           # jest; all four services have tests
 cd services/alert-processor && GEOPULSE_INTEGRATION=1 npm test  # end-to-end, needs the stack up
 ./benchmarks/run-coverage.sh                            # coverage across every service
 ```
+
+`packages/spatial` is a plain `file:` dependency, not a workspace. Services resolve it through
+`node_modules` as built output, so **build it before building a service that imports it**
+(`npm install` in the package runs `npm run build` through `prepare`). If a service fails to
+compile with "cannot find module '@geopulse/spatial'", that is the step that was skipped.
 
 Topics are no longer auto-created. If `npm run bootstrap` has not been run against a fresh
 broker, services fail to start — deliberately.

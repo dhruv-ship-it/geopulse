@@ -15,11 +15,14 @@ echo "generated: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
 echo "commit:    $(git -C "$ROOT" rev-parse --short HEAD)"
 echo
 
-for service in sensor-simulator stream-processor alert-processor api; do
+# packages/ first: a service that imports @geopulse/spatial compiles against its built
+# output, so the shared package belongs in the same honest total rather than sitting outside
+# it as an untested dependency.
+for target in packages/spatial services/sensor-simulator services/stream-processor services/alert-processor services/api; do
   echo "================================================================"
-  echo "$service"
+  echo "$target"
   echo "================================================================"
-  (cd "$ROOT/services/$service" && npx jest --coverage --coverageReporters=text 2>&1 \
+  (cd "$ROOT/$target" && npx jest --coverage --coverageReporters=text 2>&1 \
     | grep -Ev '^(PASS|FAIL|Snapshots:|Ran all|  )' )
   echo
 done
