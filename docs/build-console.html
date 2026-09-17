@@ -1,0 +1,727 @@
+<title>GeoPulse Build Console</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+
+<style>
+:root{
+  --ground:#eef1f4;
+  --surface:#f8fafb;
+  --surface-2:#e2e7ed;
+  --ink:#151b22;
+  --ink-2:#3e4a57;
+  --ink-3:#6b7885;
+  --rule:#d3dae1;
+  --rule-strong:#b9c3cd;
+  --accent:#0e7c86;
+  --accent-soft:#d6ebed;
+  --accent-ink:#0a5b63;
+  --done:#2f7d4f;
+  --done-soft:#d8e9de;
+  --active:#b4690e;
+  --active-soft:#f6e6cd;
+  --shadow:0 1px 2px rgba(21,27,34,.06),0 4px 14px rgba(21,27,34,.05);
+}
+@media (prefers-color-scheme:dark){
+  :root:not([data-theme="light"]){
+    --ground:#0e1319;
+    --surface:#151c24;
+    --surface-2:#1b242d;
+    --ink:#e6ecf2;
+    --ink-2:#adbac7;
+    --ink-3:#7d8b99;
+    --rule:#28323d;
+    --rule-strong:#3a4753;
+    --accent:#39b0ba;
+    --accent-soft:#12333a;
+    --accent-ink:#7fd4dc;
+    --done:#5cb37e;
+    --done-soft:#16301f;
+    --active:#dda64a;
+    --active-soft:#33270f;
+    --shadow:0 1px 2px rgba(0,0,0,.3),0 4px 14px rgba(0,0,0,.25);
+  }
+}
+:root[data-theme="dark"]{
+  --ground:#0e1319;
+  --surface:#151c24;
+  --surface-2:#1b242d;
+  --ink:#e6ecf2;
+  --ink-2:#adbac7;
+  --ink-3:#7d8b99;
+  --rule:#28323d;
+  --rule-strong:#3a4753;
+  --accent:#39b0ba;
+  --accent-soft:#12333a;
+  --accent-ink:#7fd4dc;
+  --done:#5cb37e;
+  --done-soft:#16301f;
+  --active:#dda64a;
+  --active-soft:#33270f;
+  --shadow:0 1px 2px rgba(0,0,0,.3),0 4px 14px rgba(0,0,0,.25);
+}
+
+*{box-sizing:border-box}
+body{
+  background:var(--ground);
+  color:var(--ink);
+  font-family:"IBM Plex Sans",-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+  font-size:15px;line-height:1.55;
+  -webkit-font-smoothing:antialiased;
+}
+h1,h2,h3{font-family:Archivo,"IBM Plex Sans",sans-serif;text-wrap:balance;margin:0}
+code,pre,.mono{font-family:"IBM Plex Mono",ui-monospace,Menlo,Consolas,monospace}
+
+.wrap{max-width:1240px;margin:0 auto;padding:32px 24px 80px}
+
+/* ---------- masthead ---------- */
+.masthead{border-bottom:1px solid var(--rule);padding-bottom:22px;margin-bottom:28px}
+.eyebrow{
+  font-size:11px;letter-spacing:.14em;text-transform:uppercase;
+  color:var(--accent-ink);font-weight:600;margin-bottom:9px;
+}
+.masthead h1{font-size:clamp(28px,4vw,38px);font-weight:700;letter-spacing:-.02em;line-height:1.1}
+.thesis{
+  margin-top:12px;max-width:60ch;color:var(--ink-2);font-size:16px;
+  border-left:2px solid var(--accent);padding-left:14px;
+}
+.thesis em{color:var(--ink);font-style:normal;font-weight:600}
+
+/* ---------- layout ---------- */
+.cols{display:grid;grid-template-columns:288px 1fr;gap:38px;align-items:start}
+@media(max-width:920px){.cols{grid-template-columns:1fr;gap:28px}}
+
+.rail{position:sticky;top:24px;display:flex;flex-direction:column;gap:22px}
+@media(max-width:920px){.rail{position:static}}
+
+/* ---------- honeycomb ---------- */
+.rail-block{
+  background:var(--surface);border:1px solid var(--rule);
+  border-radius:10px;padding:18px;box-shadow:var(--shadow);
+}
+.rail-title{
+  font-size:11px;letter-spacing:.12em;text-transform:uppercase;
+  color:var(--ink-3);font-weight:600;margin-bottom:14px;
+}
+.comb{display:flex;flex-direction:column;align-items:center;gap:3px}
+.comb-row{display:flex;gap:4px}
+.comb-row.off{margin-left:26px}
+.hex{
+  width:44px;height:50px;border:none;padding:0;cursor:pointer;
+  clip-path:polygon(50% 0%,100% 25%,100% 75%,50% 100%,0% 75%,0% 25%);
+  background:var(--surface-2);
+  color:var(--ink-3);
+  font-family:"IBM Plex Mono",monospace;font-size:12px;font-weight:500;
+  display:flex;align-items:center;justify-content:center;
+  transition:background .15s,color .15s;
+}
+.hex:hover{background:var(--rule)}
+.hex.done{background:var(--done);color:#fff}
+.hex.next{background:var(--active);color:#fff;font-weight:600}
+.hex:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+
+/* ---------- stats ---------- */
+.stat-row{display:flex;justify-content:space-between;align-items:baseline;padding:7px 0;border-bottom:1px dashed var(--rule)}
+.stat-row:last-child{border-bottom:none}
+.stat-k{font-size:13px;color:var(--ink-2)}
+.stat-v{font-family:"IBM Plex Mono",monospace;font-size:14px;font-weight:500;font-variant-numeric:tabular-nums}
+
+.meter{height:5px;background:var(--surface-2);border-radius:3px;overflow:hidden;margin:4px 0 14px}
+.meter-fill{height:100%;background:var(--accent);transition:width .35s ease}
+
+.nextup{background:var(--active-soft);border:1px solid var(--active);border-radius:10px;padding:15px 16px}
+.nextup .rail-title{color:var(--active);margin-bottom:7px}
+.nextup .n-id{font-family:"IBM Plex Mono",monospace;font-weight:600;font-size:15px;color:var(--ink)}
+.nextup .n-t{font-size:13.5px;color:var(--ink-2);margin-top:3px;line-height:1.45}
+
+/* ---------- stages + sessions ---------- */
+.stage{margin-bottom:34px}
+.stage-head{display:flex;align-items:center;gap:12px;margin-bottom:2px}
+.stage-head h2{font-size:15px;font-weight:600;letter-spacing:-.01em;white-space:nowrap}
+.stage-head .line{flex:1;height:1px;background:var(--rule)}
+.stage-head .count{
+  font-family:"IBM Plex Mono",monospace;font-size:12px;color:var(--ink-3);
+  font-variant-numeric:tabular-nums;
+}
+.stage-note{font-size:13px;color:var(--ink-3);margin:0 0 12px;max-width:62ch}
+
+.ses{border-bottom:1px solid var(--rule)}
+.ses:first-of-type{border-top:1px solid var(--rule)}
+.ses-head{
+  display:grid;grid-template-columns:auto 62px 1fr auto auto;
+  gap:14px;align-items:center;padding:13px 10px;cursor:pointer;
+  transition:background .12s;
+}
+.ses-head:hover{background:var(--surface)}
+.ses.open .ses-head{background:var(--surface)}
+.ses.is-next{border-left:3px solid var(--active);margin-left:-3px}
+.ses.is-done .ses-t{color:var(--ink-3);text-decoration:line-through;text-decoration-color:var(--rule-strong)}
+
+.tick{
+  width:19px;height:19px;border:1.5px solid var(--rule-strong);border-radius:5px;
+  background:transparent;cursor:pointer;padding:0;flex-shrink:0;
+  display:flex;align-items:center;justify-content:center;color:transparent;
+  font-size:12px;line-height:1;transition:all .15s;
+}
+.tick:hover{border-color:var(--accent)}
+.tick.on{background:var(--done);border-color:var(--done);color:#fff}
+.tick:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+
+.ses-id{font-family:"IBM Plex Mono",monospace;font-weight:600;font-size:14px;color:var(--accent-ink)}
+.ses-t{font-size:14.5px;font-weight:500}
+.ses-wp{
+  font-family:"IBM Plex Mono",monospace;font-size:11px;color:var(--ink-3);
+  background:var(--surface-2);padding:2px 7px;border-radius:4px;white-space:nowrap;
+}
+.ses-est{font-family:"IBM Plex Mono",monospace;font-size:12px;color:var(--ink-3);font-variant-numeric:tabular-nums;white-space:nowrap}
+@media(max-width:700px){
+  .ses-head{grid-template-columns:auto 52px 1fr auto;gap:10px}
+  .ses-wp{display:none}
+}
+
+.ses-body{display:none;padding:2px 10px 24px 53px}
+.ses.open .ses-body{display:block}
+@media(max-width:700px){.ses-body{padding-left:14px}}
+
+.lab{
+  font-size:11px;letter-spacing:.12em;text-transform:uppercase;font-weight:600;
+  color:var(--ink-3);margin:16px 0 7px;display:flex;align-items:center;gap:9px;
+}
+.lab:first-child{margin-top:4px}
+
+.promptbox{position:relative;background:var(--surface);border:1px solid var(--rule);border-radius:8px;overflow:hidden}
+.promptbox pre{
+  margin:0;padding:15px 16px;font-size:12.5px;line-height:1.62;color:var(--ink-2);
+  white-space:pre-wrap;word-wrap:break-word;max-height:none;
+}
+.copy{
+  position:absolute;top:9px;right:9px;
+  background:var(--surface-2);border:1px solid var(--rule-strong);color:var(--ink-2);
+  font-family:"IBM Plex Sans",sans-serif;font-size:11.5px;font-weight:600;
+  padding:5px 11px;border-radius:5px;cursor:pointer;transition:all .15s;
+}
+.copy:hover{background:var(--accent);border-color:var(--accent);color:#fff}
+.copy.ok{background:var(--done);border-color:var(--done);color:#fff}
+.copy:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+
+.manual{background:var(--surface);border:1px solid var(--rule);border-radius:8px;padding:14px 16px}
+.manual p{margin:0 0 9px;font-size:13.5px;color:var(--ink-2)}
+.manual p:last-child{margin-bottom:0}
+.manual pre{
+  margin:0 0 9px;padding:11px 13px;background:var(--surface-2);border-radius:6px;
+  font-size:12px;line-height:1.6;color:var(--ink-2);overflow-x:auto;
+}
+.manual strong{color:var(--ink);font-weight:600}
+
+.flag{
+  display:inline-flex;align-items:center;gap:6px;
+  background:var(--accent-soft);color:var(--accent-ink);
+  font-size:11.5px;font-weight:600;padding:3px 9px;border-radius:20px;
+  letter-spacing:.01em;text-transform:none;
+}
+
+/* ---------- footer rules ---------- */
+.rules{margin-top:46px;border-top:2px solid var(--ink);padding-top:22px}
+.rules h2{font-size:17px;font-weight:700;margin-bottom:16px}
+.rules ol{margin:0;padding-left:0;list-style:none;counter-reset:r;display:grid;gap:13px}
+.rules li{counter-increment:r;padding-left:38px;position:relative;font-size:14px;color:var(--ink-2);max-width:78ch}
+.rules li::before{
+  content:counter(r);position:absolute;left:0;top:0;
+  width:25px;height:25px;border-radius:50%;background:var(--ink);color:var(--ground);
+  font-family:"IBM Plex Mono",monospace;font-size:12px;font-weight:600;
+  display:flex;align-items:center;justify-content:center;
+}
+.rules strong{color:var(--ink);font-weight:600}
+
+.footnote{margin-top:30px;font-size:12.5px;color:var(--ink-3);border-top:1px solid var(--rule);padding-top:14px;max-width:80ch}
+.footnote code{background:var(--surface-2);padding:1px 5px;border-radius:3px;font-size:11.5px}
+
+@media(prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
+</style>
+
+<script id="app-state" type="application/json">{"done":[]}</script>
+
+<div class="wrap">
+  <header class="masthead">
+    <div class="eyebrow">Phase 1 · Spatiotemporal Incident Correlation</div>
+    <h1>GeoPulse Build Console</h1>
+    <p class="thesis">
+      <em>A single sensor going critical is noise. The signal is the geometry.</em>
+      Thirteen sessions to turn a per-zone alerting pipeline into an engine that collapses
+      alert storms into geographically-coherent incidents.
+    </p>
+  </header>
+
+  <div class="cols">
+    <aside class="rail">
+      <div class="rail-block">
+        <div class="rail-title">Progress</div>
+        <div class="meter"><div class="meter-fill" id="meter" style="width:0%"></div></div>
+        <div class="comb" id="comb"></div>
+      </div>
+
+      <div class="rail-block">
+        <div class="rail-title">At a glance</div>
+        <div class="stat-row"><span class="stat-k">Sessions done</span><span class="stat-v" id="s-done">0 / 13</span></div>
+        <div class="stat-row"><span class="stat-k">Build time left</span><span class="stat-v" id="s-time">~13h</span></div>
+        <div class="stat-row"><span class="stat-k">At 2 / day</span><span class="stat-v" id="s-days">7 days</span></div>
+        <div class="stat-row"><span class="stat-k">Resume update</span><span class="stat-v" id="s-resume">after S9</span></div>
+      </div>
+
+      <div class="nextup" id="nextup">
+        <div class="rail-title">Next up</div>
+        <div class="n-id" id="n-id">S1 · WP0</div>
+        <div class="n-t" id="n-t">Foundation and defect cleanup</div>
+      </div>
+    </aside>
+
+    <main id="stages"></main>
+  </div>
+
+  <section class="rules">
+    <h2>If you only remember four things</h2>
+    <ol>
+      <li><strong>One work package per session.</strong> Start each one fresh. Never carry two packages in a single session — the second always gets worse code, because by then the context is full of the first.</li>
+      <li><strong>Every session ends with commits and a <code>STATUS.md</code> update.</strong> That is the whole mechanism that makes a session dying cost you nothing.</li>
+      <li><strong>Update the resume at S9</strong>, not at the end. Two measured bullets beat four imagined ones, and S9 is where the first real numbers land.</li>
+      <li><strong>A bad measured number is worth more than a good invented one.</strong> If the eval comes back ugly, that is the project working — record it, diagnose it, fix it, and you have an interview story nobody else has.</li>
+    </ol>
+  </section>
+
+  <p class="footnote">
+    Prompts mirror <code>docs/07-BUILD-ROADMAP.md</code>, which is the source of truth for agent
+    sessions. <code>docs/STATUS.md</code> is authoritative for build progress — the ticks here are
+    your own view of it. Each prompt assumes a fresh session in the repo, so
+    <code>CLAUDE.md</code> is already loaded.
+  </p>
+</div>
+
+<script>
+const SESSIONS=[
+{id:"S1",wp:"WP0",t:"Foundation and defect cleanup",est:"60–90m",stage:0,
+p:`Read docs/STATUS.md, then docs/01-ARCHITECTURE.md section 3, then docs/02-PHASE-1-CORRELATION.md WP0.
+
+Implement WP0 completely. All six items in the spec, all four acceptance criteria.
+
+Priorities and gotchas:
+- D1 is the important one. The exception from a failed Postgres insert is swallowed inside
+  eachMessage, so the offset commits and the alert is gone. Fix by letting it propagate, with
+  bounded retry + backoff, then a zone.degradations.dlq dead-letter topic after exhaustion.
+  Write a test that proves the message survives a Postgres failure.
+- D4: alertFlow.int.test.ts declares a stub AlertProcessor class inside the test file and tests
+  that instead of the real one. Rewrite it to exercise the real implementation, or delete it and
+  write a real one. Do not leave a test that tests nothing.
+- The zone registry (item 5) is what WP1 depends on. Get the shape right:
+  zones:registry SET + zone:<id> HASH extended with h3Cell and h3CoarseCell.
+  h3-js is not installed yet; add it now and compute the cells here.
+
+Commit incrementally as you go (one commit per defect fix is about right), no Claude co-author
+trailers. Update docs/STATUS.md when done: WP0 status, D1/D2/D4/D5 marked closed.`,
+m:`<p>Bring the stack up and confirm the topics were created with real partition counts:</p>
+<pre>cd infra &amp;&amp; docker-compose up -d
+cd services/stream-processor &amp;&amp; npm run bootstrap-topics
+docker exec geopulse-kafka kafka-topics --bootstrap-server localhost:9092 --describe</pre>
+<p><code>raw.zone.events</code>, <code>zone.degradations</code> and <code>zone.incidents</code> should each show <strong>12 partitions</strong>. Then run <code>npm test</code> in every service.</p>`},
+
+{id:"S2",wp:"WP6a",t:"Simulator ground truth",est:"45–60m",stage:0,
+p:`Read docs/STATUS.md, then docs/03-MEASUREMENT.md, then docs/02-PHASE-1-CORRELATION.md WP6a.
+
+Implement WP6a: the anomaly injection scenarios and ground-truth emission in sensor-simulator.
+
+All four scenarios from docs/03-MEASUREMENT.md section 2.1 are required — regional-anomaly,
+propagating-anomaly, multi-anomaly, and noise. The last two exist to catch over-grouping and
+hallucinated incidents; do not skip them because they seem less interesting.
+
+Ground truth goes to evals/groundtruth/<run-id>.jsonl in exactly the schema in
+docs/03-MEASUREMENT.md section 2, with the seed embedded in the run id.
+
+Hard constraint from CLAUDE.md rule 3: everything stays deterministic. Seeded PRNG only, no
+Math.random(), no Date.now() in generation logic. Same seed must produce a byte-identical run.
+Write a test that asserts exactly that.
+
+Commit incrementally. Update docs/STATUS.md.`,
+m:`<pre>cd services/sensor-simulator
+SCENARIO=regional-anomaly NUM_ZONES=200 npm run dev
+# let it run ~2 min, Ctrl+C
+cat ../../evals/groundtruth/*.jsonl | head -3</pre>
+<p>Check the JSONL carries <code>affectedZones</code> with per-zone onset times. Then run the same seed twice and <code>diff</code> the two files — they must be identical.</p>`},
+
+{id:"S3",wp:"WP1",t:"H3 spatial layer",est:"40–60m",stage:0,
+p:`Read docs/STATUS.md, then docs/02-PHASE-1-CORRELATION.md WP1.
+
+Implement WP1: the NeighbourGraph over H3 cells, its tests, the micro-benchmark, and ADR-001.
+
+Put it in a place both stream-processor and the future correlation-engine can use — either a
+shared package or a module that gets copied; pick one, say why in the code, keep it consistent.
+
+Tests must cover the antimeridian (lon near +/-180) and high latitudes, plus zones alone in a
+cell and several zones in one cell.
+
+The micro-benchmark compares neighboursOf against a naive haversine scan over all zones at
+1k/10k/100k zones. Commit the raw output under benchmarks/results/. This benchmark is what
+justifies the design choice, so it matters that it is real.
+
+ADR-001 must record why H3 over geohash and over k-d tree/R-tree KNN, and specifically why
+hexagons: all six neighbours equidistant, versus a square grid where diagonals are sqrt(2)
+farther, which would make "adjacent" direction-dependent.
+
+Commit incrementally. Update docs/STATUS.md and the ADR table.`,
+m:`<p>Run the benchmark and confirm the neighbour-lookup curve is <strong>flat</strong> against the naive scan's linear one. Copy the numbers into the measured-numbers table in <code>docs/STATUS.md</code>.</p>`},
+
+{id:"S4",wp:"WP2a",t:"Connectivity core",est:"75–100m",stage:1,
+p:`Read docs/STATUS.md, then docs/02-PHASE-1-CORRELATION.md WP2 (all of it), then
+docs/01-ARCHITECTURE.md section 5.
+
+Implement WP2 items 1 and 2 ONLY this session — CorrelationWindow and TimeAwareConnectivity,
+plus the NaiveConnectivity oracle and the differential fuzz test. Stop before IncidentLifecycle;
+that is the next session.
+
+This is the algorithmic core of the whole project, so take it slowly and prioritise correctness
+over cleverness.
+
+- Union-find with path compression and union by rank on the hot path.
+- Expiry via a compaction tick that rebuilds ONLY components that lost a member (local BFS over
+  that component's survivors), not a global recompute.
+- NaiveConnectivity does a full recompute every tick. It is not dead code — it is the test oracle.
+- The differential fuzz test drives both with the same 10,000 randomised event sequences and
+  asserts identical component partitions. Use fast-check if helpful.
+- Event-time only. No Date.now() anywhere in this logic.
+
+Commit incrementally — CorrelationWindow, then naive, then optimised, then the fuzz test.
+Update docs/STATUS.md.`,
+m:`<p>Run <code>npm test</code>. The differential fuzz must show <strong>zero divergence</strong> across all 10,000 sequences.</p><p>If it finds a divergence, that is the test doing its job — the next session fixes it before anything else moves forward.</p>`},
+
+{id:"S5",wp:"WP2b",t:"Incident lifecycle",est:"75–100m",stage:1,
+p:`Read docs/STATUS.md, then docs/02-PHASE-1-CORRELATION.md WP2 items 3, 4, 5.
+
+Implement IncidentLifecycle: OPENED / GREW / MERGED / SHRANK / CLOSED, deterministic incident
+IDs, split handling, property-based tests, and ADR-002 and ADR-003.
+
+The two decisions that need to be exactly right, because they are the ones that get asked about
+in interviews:
+- MERGE: survivor is the earlier openedAt, ties broken lexicographically on incidentId. Emit
+  MERGED on the survivor with mergedFrom, and a terminal event on each loser with supersededBy.
+- SPLIT (bridging member expires): largest surviving fragment keeps the ID, other fragments open
+  fresh incidents. Record the reasoning in ADR-003 — on-call continuity over set-theoretic purity.
+
+incidentId must be a hash of (sorted seed member IDs + opening event time). Not a UUID, not a
+counter — it has to be stable across replays.
+
+Property tests: every active zone in exactly one component; two zones share a component iff a
+path of active adjacent zones connects them; no OPEN incident below MIN_ZONES; replaying the same
+sequence twice produces byte-identical output.
+
+Commit incrementally. Update docs/STATUS.md and mark WP2 done.`,
+m:`<p>Run the property tests. Pay particular attention to the replay-determinism one — if the same event sequence produces different incident IDs on two runs, something is reading the wall clock and it must be found now, not later.</p>`},
+
+{id:"S6",wp:"WP3a",t:"Correlation engine service",est:"60–90m",stage:2,
+p:`Read docs/STATUS.md, then docs/02-PHASE-1-CORRELATION.md WP3, then docs/01-ARCHITECTURE.md
+sections 4.2 and 6.
+
+Build the services/correlation-engine service: items 1-5 and 7 of the WP3 spec. Leave item 6
+(Postgres persistence) and item 8 (stream-processor changes) for the next session.
+
+Follow the conventions of the existing services exactly — pino logger, prom-client metrics,
+tsconfig, jest setup, package.json script names. Consistency matters here; an inconsistent new
+service looks bolted on.
+
+Use eachBatch, not eachMessage. The reason goes in the service README: a regional event produces
+a burst of degradations, and batching means one consolidated incident update instead of one GREW
+event per zone.
+
+Wire in the WP1 NeighbourGraph and the WP2 correlation core rather than reimplementing anything.
+
+Commit incrementally. Update docs/STATUS.md.`,
+m:`<p>The service should start clean against the running infra and expose its metrics endpoint. Nothing meaningful flows through it yet — that is S7.</p>`},
+
+{id:"S7",wp:"WP3b",t:"End-to-end integration",est:"60–90m",stage:2,
+p:`Read docs/STATUS.md, then docs/02-PHASE-1-CORRELATION.md WP3 items 6 and 8.
+
+Finish the pipeline end to end:
+- stream-processor emits ZoneDegradation to zone.degradations keyed by h3CoarseCell, including
+  recovery transitions to NORMAL so the correlation window can release members early.
+- Postgres migration for incidents, incident_members, incident_events with the indexes in the spec.
+- Incident persistence (extend alert-processor or add incident-processor — pick one, justify it
+  briefly in the commit message).
+- Containerise all services and extend infra/docker-compose.yml so the whole stack comes up with
+  one command, not just infra.
+
+Then run the full stack against SCENARIO=regional-anomaly and confirm one injected regional
+anomaly produces exactly one incident. Fix what that reveals.
+
+Commit incrementally. Update docs/STATUS.md.`,
+m:`<p><span class="flag">The moment it becomes real</span></p>
+<pre>cd infra &amp;&amp; docker-compose up -d --build
+docker-compose logs -f correlation-engine
+
+# second terminal
+cd services/sensor-simulator &amp;&amp; SCENARIO=regional-anomaly NUM_ZONES=500 npm run dev</pre>
+<p>You should see <strong>one incident open and grow</strong>, not hundreds of alerts. Then confirm it persisted:</p>
+<pre>docker exec geopulse-postgres psql -U geopulse -d geopulse \\
+  -c "select incident_id, status, member_count from incidents;"</pre>`},
+
+{id:"S8",wp:"WP6b",t:"Eval harness",est:"60–75m",stage:3,
+p:`Read docs/STATUS.md, then all of docs/03-MEASUREMENT.md, then docs/02-PHASE-1-CORRELATION.md WP6b.
+
+Build evals/score.ts: consume the ground truth and the emitted incidents, produce every metric in
+docs/03-MEASUREMENT.md section 3 — collapse ratio, membership precision/recall/F1 (greedy
+one-to-one Jaccard matching), time-to-detect p50/p95, fragmentation index, false-incident rate.
+Propagation error can be stubbed until WP4 lands.
+
+One command to run: npm run eval. Writes timestamped raw results to evals/results/ including the
+seed and full config. Those files are the provenance for every number that reaches the resume,
+so they must be complete.
+
+Run it against all four scenarios and commit the raw results.
+
+Commit incrementally. Update docs/STATUS.md — and fill in the measured-numbers table with whatever
+it actually produced, good or bad.`,
+m:`<p><span class="flag">First real numbers</span></p>
+<pre>npm run eval</pre>
+<p>If the false-incident rate on <code>noise</code> is bad, or fragmentation is high, <strong>record it anyway</strong>. That is data, and tuning it in S9 is a better interview story than a clean number that arrived with no struggle.</p>`},
+
+{id:"S9",wp:"WP6b",t:"Benchmarks and tuning sweep",est:"60–75m",stage:3,
+p:`Read docs/STATUS.md, then docs/03-MEASUREMENT.md sections 3.7 and 4.
+
+Build benchmarks/throughput.ts per the protocol in section 4 — 60s warmup discarded, steady state
+only (consumer lag must be flat or the number is invalid), p50/p95/p99 not means, fixed seed,
+environment recorded, raw output committed.
+
+Measure at 1k / 10k / 50k zones: sustained throughput, correlation latency, compaction duration p99.
+
+Also measure the baseline: per-message, single partition, no batching, on the same hardware on the
+same day. A speedup claim is only meaningful against a baseline actually measured.
+
+Then run the parameter sweep over CORRELATION_WINDOW_MS, H3_RESOLUTION and NEIGHBOUR_RING_SIZE
+across all four eval scenarios, and produce the tuning curve. Pick the operating point off that
+curve and record why in docs/STATUS.md.
+
+Commit raw results. Update docs/STATUS.md measured-numbers table.`,
+m:`<p><span class="flag">Resume checkpoint</span></p>
+<p>Benchmarks take real wall-clock time — start them and go do something else.</p>
+<p>When they finish, <strong>update your resume that day</strong> using <code>docs/05-RESUME.md</code> §3. You now have measured numbers for target bullets 1 and 3. Do not wait for the project to be finished.</p>`},
+
+{id:"S10",wp:"WP4",t:"Propagation vector",est:"45–60m",stage:4,
+p:`Read docs/STATUS.md, then docs/02-PHASE-1-CORRELATION.md WP4.
+
+Implement the propagation vector: weighted least squares of lat-vs-time and lon-vs-time over
+member join times, converted to bearing and speed, with the cos(latitude) correction on longitude.
+
+Emit propagation: null rather than a garbage vector when rSquared is low or there are fewer than
+3 members with distinct join times. Refusing to report an untrustworthy number is deliberate and
+should be visible in the output.
+
+Guard the degenerate cases: all members joined simultaneously, collinear in time, single cell.
+
+Then wire it into evals/score.ts and validate against the propagating-anomaly ground truth —
+report bearing error, speed error, AND what fraction of propagating anomalies produced a usable
+vector at all.
+
+Commit incrementally. Update docs/STATUS.md.`,
+m:`<p>Check the recovered bearing against what the simulator injected. Also confirm that a <em>stationary</em> incident correctly reports <code>null</code> rather than inventing a direction — that negative case is the one worth demonstrating.</p>`},
+
+{id:"S11",wp:"WP5a",t:"Incident API",est:"45–60m",stage:4,
+p:`Read docs/STATUS.md, then docs/02-PHASE-1-CORRELATION.md WP5 item 1.
+
+Implement the six incident endpoints. Follow the existing routes' conventions in services/api/src/routes/.
+
+GET /stats/collapse is the important one — it computes the headline collapse metric live, and its
+output must agree with what evals/score.ts computes. Add a test asserting they agree.
+
+Commit incrementally. Update docs/STATUS.md.`,
+m:`<pre>curl localhost:3000/incidents?status=OPEN
+curl localhost:3000/stats/collapse</pre>
+<p>The collapse figure must match what the eval harness computed. If the two disagree, one of them is wrong and you need to know which before it reaches a resume.</p>`},
+
+{id:"S12",wp:"WP5b",t:"Live map UI",est:"60–90m",stage:4,
+p:`Read docs/STATUS.md, then docs/02-PHASE-1-CORRELATION.md WP5 items 2 and 3.
+
+Build the live map: single static page, MapLibre GL or Leaflet, served by the api service.
+H3 cells as hex polygons coloured by zone state, incidents as a hull over member cells with an
+arrow for the propagation vector, and a live counter showing degradations vs incidents with the
+collapse percentage.
+
+Stream updates over SSE from the api service fed by the zone.incidents topic.
+
+This is the artefact that sells the project, so make it legible at a glance rather than dense.
+
+Commit incrementally. Update docs/STATUS.md.`,
+m:`<p>Run a <code>propagating-anomaly</code> scenario and <strong>record a GIF</strong> of the incident spreading across the map. That GIF goes at the top of the README and is the single most persuasive thing in the whole repo.</p>`},
+
+{id:"S13",wp:"WP7",t:"Documentation and resume",est:"45–60m",stage:5,
+p:`Read docs/STATUS.md, then docs/02-PHASE-1-CORRELATION.md WP7, then docs/05-RESUME.md.
+
+Rewrite the root README.md around the new thesis: problem, insight, architecture diagram, results
+table, demo GIF, how to run, limitations. Lead with the results table — real numbers from
+evals/results/ and benchmarks/results/ only, no estimates.
+
+Write ADR-004 (partitioning on coarse H3 cells) and verify ADR-001 through 003 are complete and
+honest about rejected alternatives.
+
+Add a LIMITATIONS section stating plainly what is not built — crash-safety, cross-partition merge,
+learned thresholds — and the fix for each, referencing docs/06-FUTURE-PHASES.md.
+
+Then fill docs/05-RESUME.md section 3 with the measured numbers, replacing every TBD. If a number
+was never measured, leave TBD and say so — do not estimate.
+
+Commit incrementally. Mark Phase 1 complete in docs/STATUS.md.`,
+m:`<p>Final pass on the actual resume entry, then push to GitHub.</p><p>Read the README once as a stranger would: does the results table land in the first screen, and does the demo GIF show the collapse happening? Those two things carry the repo.</p>`}
+];
+
+const STAGES=[
+ {n:"Foundation",d:"Clear the defects that would corrupt every later measurement, then build the ground truth and the spatial index the engine depends on."},
+ {n:"Correlation core",d:"The algorithmic heart — connectivity under expiry, and incident identity through merges and splits. Budget the most time here."},
+ {n:"Integration",d:"Wire the core into a real service and prove the pipeline end to end."},
+ {n:"Measurement",d:"Where claims become numbers. Nothing reaches the resume that did not come out of these two sessions."},
+ {n:"Surface",d:"Make it visible — the propagation vector, the API, and the map that sells the whole idea."},
+ {n:"Ship",d:"README, ADRs, and the resume entry."}
+];
+
+const TOTAL_MIN=[75,52,50,87,87,75,75,67,67,52,52,75,52];
+const PRISTINE='<!doctype html>\n'+document.documentElement.outerHTML;
+let state=JSON.parse(document.getElementById('app-state').textContent);
+let artifactApi=null, pubTimer=null;
+
+if(window.claude&&claude.use){
+  claude.use('artifact').then(a=>{artifactApi=a;}).catch(()=>{});
+}
+
+function save(){
+  if(!artifactApi)return;
+  clearTimeout(pubTimer);
+  pubTimer=setTimeout(()=>{
+    const html=PRISTINE.replace(
+      /(<script id="app-state" type="application\/json">)[\s\S]*?(<\/script>)/,
+      (m,a,b)=>a+JSON.stringify(state)+b
+    );
+    artifactApi.publish(html).catch(()=>{});
+  },700);
+}
+
+const isDone=id=>state.done.indexOf(id)>-1;
+function nextSession(){return SESSIONS.find(s=>!isDone(s.id))||null;}
+
+function render(){
+  const nx=nextSession();
+
+  // honeycomb: rows of 5 / 4 / 4
+  const comb=document.getElementById('comb');
+  comb.innerHTML='';
+  const rows=[SESSIONS.slice(0,5),SESSIONS.slice(5,9),SESSIONS.slice(9,13)];
+  rows.forEach((row,ri)=>{
+    const r=document.createElement('div');
+    r.className='comb-row'+(ri===1?' off':'');
+    row.forEach(s=>{
+      const b=document.createElement('button');
+      b.className='hex'+(isDone(s.id)?' done':(nx&&nx.id===s.id?' next':''));
+      b.textContent=s.id;
+      b.title=s.id+' · '+s.t;
+      b.setAttribute('aria-label',s.id+' '+s.t+(isDone(s.id)?' (done)':''));
+      b.onclick=()=>{
+        const el=document.getElementById('ses-'+s.id);
+        document.querySelectorAll('.ses').forEach(x=>x.classList.remove('open'));
+        el.classList.add('open');
+        el.scrollIntoView({behavior:'smooth',block:'center'});
+      };
+      r.appendChild(b);
+    });
+    comb.appendChild(r);
+  });
+
+  const n=state.done.length;
+  document.getElementById('meter').style.width=(n/13*100)+'%';
+  document.getElementById('s-done').textContent=n+' / 13';
+
+  let mins=0;
+  SESSIONS.forEach((s,i)=>{if(!isDone(s.id))mins+=TOTAL_MIN[i];});
+  document.getElementById('s-time').textContent='~'+Math.round(mins/60)+'h';
+  document.getElementById('s-days').textContent=Math.max(0,Math.ceil((13-n)/2))+' days';
+
+  const s9=isDone('S9');
+  document.getElementById('s-resume').textContent=s9?'do it now':'after S9';
+
+  const nu=document.getElementById('nextup');
+  if(nx){
+    document.getElementById('n-id').textContent=nx.id+' · '+nx.wp;
+    document.getElementById('n-t').textContent=nx.t;
+    nu.style.display='';
+  }else{
+    document.getElementById('n-id').textContent='Phase 1 complete';
+    document.getElementById('n-t').textContent='Every session done. Push to GitHub and finish the resume entry.';
+  }
+
+  document.querySelectorAll('.ses').forEach(el=>{
+    const id=el.dataset.id;
+    el.classList.toggle('is-done',isDone(id));
+    el.classList.toggle('is-next',!!nx&&nx.id===id);
+    const t=el.querySelector('.tick');
+    t.classList.toggle('on',isDone(id));
+    t.textContent=isDone(id)?'✓':'';
+    t.setAttribute('aria-pressed',isDone(id)?'true':'false');
+  });
+
+  document.querySelectorAll('.stage').forEach(st=>{
+    const ids=JSON.parse(st.dataset.ids);
+    const c=ids.filter(isDone).length;
+    st.querySelector('.count').textContent=c+'/'+ids.length;
+  });
+}
+
+function build(){
+  const host=document.getElementById('stages');
+  STAGES.forEach((stg,si)=>{
+    const list=SESSIONS.filter(s=>s.stage===si);
+    const sec=document.createElement('section');
+    sec.className='stage';
+    sec.dataset.ids=JSON.stringify(list.map(s=>s.id));
+    sec.innerHTML='<div class="stage-head"><h2>'+stg.n+'</h2><span class="line"></span>'+
+      '<span class="count">0/'+list.length+'</span></div><p class="stage-note">'+stg.d+'</p>';
+
+    list.forEach(s=>{
+      const d=document.createElement('article');
+      d.className='ses';d.dataset.id=s.id;d.id='ses-'+s.id;
+      d.innerHTML=
+        '<div class="ses-head">'+
+          '<button class="tick" aria-label="Mark '+s.id+' complete" aria-pressed="false"></button>'+
+          '<span class="ses-id">'+s.id+'</span>'+
+          '<span class="ses-t">'+s.t+'</span>'+
+          '<span class="ses-wp">'+s.wp+'</span>'+
+          '<span class="ses-est">'+s.est+'</span>'+
+        '</div>'+
+        '<div class="ses-body">'+
+          '<div class="lab">Paste into a fresh session</div>'+
+          '<div class="promptbox"><button class="copy">Copy</button><pre></pre></div>'+
+          '<div class="lab">Then, by hand</div>'+
+          '<div class="manual">'+s.m+'</div>'+
+        '</div>';
+      d.querySelector('pre').textContent=s.p;
+
+      d.querySelector('.ses-head').onclick=e=>{
+        if(e.target.closest('.tick'))return;
+        d.classList.toggle('open');
+      };
+      d.querySelector('.tick').onclick=e=>{
+        e.stopPropagation();
+        const i=state.done.indexOf(s.id);
+        if(i>-1)state.done.splice(i,1);else state.done.push(s.id);
+        render();save();
+      };
+      const cp=d.querySelector('.copy');
+      cp.onclick=e=>{
+        e.stopPropagation();
+        navigator.clipboard.writeText(s.p).then(()=>{
+          cp.textContent='Copied';cp.classList.add('ok');
+          setTimeout(()=>{cp.textContent='Copy';cp.classList.remove('ok');},1600);
+        }).catch(()=>{cp.textContent='Select manually';});
+      };
+      sec.appendChild(d);
+    });
+    host.appendChild(sec);
+  });
+}
+
+build();
+render();
+const first=nextSession();
+if(first)document.getElementById('ses-'+first.id).classList.add('open');
+</script>
