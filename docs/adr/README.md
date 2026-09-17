@@ -22,6 +22,7 @@ separates a defended decision from an arbitrary one.
 
 | ADR | Title | Written in |
 |---|---|---|
+| ADR-000 | Delivery semantics for alert persistence, and what happens on failure | WP0 ✅ |
 | ADR-001 | H3 vs geohash vs k-d tree | WP1 |
 | ADR-002 | Time-aware connectivity strategy | WP2 |
 | ADR-003 | Incident identity, merge and split semantics | WP2 |

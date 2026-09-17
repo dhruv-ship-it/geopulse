@@ -85,21 +85,30 @@ Phase 1 adds **H3** (`h3-js`) for hex-grid spatial indexing.
 
 ```
 infra/                       docker-compose (kafka, zookeeper, redis, postgres)
+tools/
+  kafka-bootstrap/           explicit topic creation (partition counts, DLQ retention)
 services/
   sensor-simulator/          synthetic event generation -> Kafka
   stream-processor/          per-zone windows + state machine -> Redis, Kafka
-  alert-processor/           alert persistence (Redis + Postgres)
+  alert-processor/           alert persistence (Redis + Postgres) + DLQ
   api/                       Express read API
   correlation-engine/        [PHASE 1 - NEW] spatial correlation -> incidents
 docs/                        this documentation set
-benchmarks/                  [PHASE 1 - NEW] committed benchmark scripts + raw results
+docs/adr/                    architecture decision records
+benchmarks/                  committed benchmark scripts + raw results
 evals/                       [PHASE 1 - NEW] ground-truth eval harness + results
 ```
 
 ## Commands
 
 ```bash
-cd infra && docker-compose up -d          # start kafka/redis/postgres
+cd infra && docker-compose up -d                        # start kafka/redis/postgres
+cd tools/kafka-bootstrap && npm install && npm run bootstrap   # create topics (run once, after compose)
 cd services/<svc> && npm install && npm run dev
-cd services/<svc> && npm test             # jest
+cd services/<svc> && npm test                           # jest; all four services have tests
+cd services/alert-processor && GEOPULSE_INTEGRATION=1 npm test  # end-to-end, needs the stack up
+./benchmarks/run-coverage.sh                            # coverage across every service
 ```
+
+Topics are no longer auto-created. If `npm run bootstrap` has not been run against a fresh
+broker, services fail to start — deliberately.

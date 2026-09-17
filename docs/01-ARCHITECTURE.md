@@ -85,14 +85,31 @@ is bounded by latency rather than by CPU.
 
 These are real bugs found by reading the code. Fixing them is work package **WP0**.
 
+**Status after WP0 (commit `7fa7e0a`): D1, D2, D4, D5, D7 closed. D3, D6 still open.**
+
 | # | Defect | Location | Why it matters |
 |---|---|---|---|
-| D1 | **Silent data loss.** The `eachMessage` handler catches and logs the exception thrown by a failed Postgres insert, so the offset commits anyway and the alert is permanently lost. The code comment claims it "fails loudly for compliance/audit"; it does not. | `alert-processor/src/kafkaConsumer.ts` ~L92 | Corrupts any durability claim. Also a perfect "tell me about a bug you found" story once fixed. |
-| D2 | **`KEYS` in an API hot path.** `redisClient.keys('zone:Z-*')` blocks the Redis event loop, O(N) over the whole keyspace. | `api/src/routes/zones.ts` L22 | Well-known anti-pattern; an interviewer who reads the code will spot it. Replace with a registry SET + pipelined `HGETALL`, or `SCAN`. |
-| D3 | **No real watermarking.** `TimeWindowManager.evictExpiredBuckets` treats the *incoming event's* timestamp as "now". A single future-dated event evicts the entire window; an out-of-order event lands in a bucket that was already evicted, double-counting. | `stream-processor/src/timeWindowManager.ts` | "Event-time semantics" is claimed in commit messages but not actually implemented. Either implement a watermark with allowed-lateness, or stop claiming event-time. |
-| D4 | **Test coverage claim is hollow.** `jest.config.js` scopes `collectCoverageFrom` to exactly two files. Worse, `alert-processor/src/__tests__/alertFlow.int.test.ts` declares a *stub* `AlertProcessor` class inside the test file and tests that instead of the real implementation — the alert-processor lcov report reads `LH:0` (zero lines hit) for every source file. | `*/jest.config.js`, `alert-processor/src/__tests__/` | The current resume bullet claims 90%+ coverage. It is technically scoped to "core stream-processing logic" so it is not a lie, but it collapses under one follow-up question. |
-| D5 | **Unbounded zone state map.** `stream-processor` keeps `zoneStates` and `zoneCoordinates` maps that only ever grow. No eviction for zones that stop reporting. | `stream-processor/src/streamProcessor.ts` L20-21 | Memory leak at scale; relevant once we run 10k-zone benchmarks. |
-| D6 | **Zookeeper-mode Kafka.** `confluentinc/cp-zookeeper` + ZK-coordinated broker. Zookeeper was removed entirely in Kafka 4.0; KRaft is the current standard. | `infra/docker-compose.yml` | Not urgent, but know the answer. Cheap to migrate and a good talking point. |
+| D1 ✅ | **Silent data loss.** The `eachMessage` handler catches and logs the exception thrown by a failed Postgres insert, so the offset commits anyway and the alert is permanently lost. The code comment claims it "fails loudly for compliance/audit"; it does not. | `alert-processor/src/kafkaConsumer.ts` ~L92 | Corrupts any durability claim. Also a perfect "tell me about a bug you found" story once fixed. |
+| D2 ✅ | **`KEYS` in an API hot path.** `redisClient.keys('zone:Z-*')` blocks the Redis event loop, O(N) over the whole keyspace. | `api/src/routes/zones.ts` L22 | Well-known anti-pattern; an interviewer who reads the code will spot it. Replace with a registry SET + pipelined `HGETALL`, or `SCAN`. |
+| D3 ⬜ | **No real watermarking.** `TimeWindowManager.evictExpiredBuckets` treats the *incoming event's* timestamp as "now". A single future-dated event evicts the entire window; an out-of-order event lands in a bucket that was already evicted, double-counting. | `stream-processor/src/timeWindowManager.ts` | "Event-time semantics" is claimed in commit messages but not actually implemented. Either implement a watermark with allowed-lateness, or stop claiming event-time. |
+| D4 ✅ | **Test coverage claim is hollow.** `jest.config.js` scopes `collectCoverageFrom` to exactly two files. Worse, `alert-processor/src/__tests__/alertFlow.int.test.ts` declares a *stub* `AlertProcessor` class inside the test file and tests that instead of the real implementation — the alert-processor lcov report reads `LH:0` (zero lines hit) for every source file. | `*/jest.config.js`, `alert-processor/src/__tests__/` | The current resume bullet claims 90%+ coverage. It is technically scoped to "core stream-processing logic" so it is not a lie, but it collapses under one follow-up question. |
+| D5 ✅ | **Unbounded zone state map.** `stream-processor` keeps `zoneStates` and `zoneCoordinates` maps that only ever grow. No eviction for zones that stop reporting. | `stream-processor/src/streamProcessor.ts` L20-21 | Memory leak at scale; relevant once we run 10k-zone benchmarks. |
+| D6 ⬜ | **Zookeeper-mode Kafka.** `confluentinc/cp-zookeeper` + ZK-coordinated broker. Zookeeper was removed entirely in Kafka 4.0; KRaft is the current standard. | `infra/docker-compose.yml` | Not urgent, but know the answer. Cheap to migrate and a good talking point. |
+| D7 ✅ | **Simulator load depends on the host timezone.** `LoadGenerator.addRealisticVariation` read the time-of-day pattern with `Date#getHours()`, which is host-local. The same event timestamp produced a different load in a different timezone, or either side of a DST change. | `sensor-simulator/src/loadGenerator.ts` | Found while writing the WP0 determinism tests. Directly breaks the "simulator is deterministic" property that replay and every measured number rest on. Now `getUTCHours()`. |
+
+### 3.1 How each closed defect was closed (WP0)
+
+| # | Fix | Where to read it |
+|---|---|---|
+| D1 | Exception propagates out of `eachMessage`; bounded retry with exponential backoff, then `zone.degradations.dlq`; DLQ failure rethrows so the offset stays uncommitted. | `alert-processor/src/messageRecovery.ts`, `deadLetter.ts`; `docs/adr/ADR-000-delivery-semantics-and-dlq.md` |
+| D2 | `zones:registry` SET + one pipelined `HGETALL` batch. `SCAN` kept only as an explicitly-labelled recovery path that repopulates the set. | `api/src/zoneRepository.ts` |
+| D4 | Stub `AlertProcessor` deleted; real class under test, plus a gated end-to-end test through the real consumer. `collectCoverageFrom` widened to every source file, thresholds removed. | `alert-processor/src/__tests__/`, `*/jest.config.js`, `benchmarks/results/wp0-coverage.txt` |
+| D5 | `ZoneStateStore` evicts zones idle for `ZONE_STATE_IDLE_TTL_MS`, driven by an event-time watermark so replays evict identically. | `stream-processor/src/zoneStateStore.ts` |
+| D7 | `getUTCHours()`; determinism test suite added for the simulator. | `sensor-simulator/src/__tests__/determinism.test.ts` |
+
+**Also fixed in WP0, not originally listed as a defect:** topics were auto-created with broker
+defaults (one partition), so the `zoneId` keying bought no parallelism at all. `tools/kafka-bootstrap`
+now creates them explicitly with 12 partitions and `allowAutoTopicCreation` is `false` everywhere.
 
 ---
 
@@ -249,3 +266,20 @@ problem does not exist.
 | `INCIDENT_CLOSE_GRACE_MS` | `60000` | Grace period below `MIN_ZONES` before closing. |
 | `NEIGHBOUR_RING_SIZE` | `1` | `gridDisk` k. Raising it makes correlation more aggressive. |
 | `COMPACTION_INTERVAL_MS` | `5000` | Expiry/compaction tick for the connectivity structure. |
+
+### 7.1 Added in WP0
+
+| Variable | Default | Service | Meaning |
+|---|---|---|---|
+| `KAFKA_TOPIC_PARTITIONS` | `12` | kafka-bootstrap | Partition count for the main topics. |
+| `KAFKA_REPLICATION_FACTOR` | `1` | kafka-bootstrap | Single-broker dev cluster. |
+| `ALERT_MAX_ATTEMPTS` | `4` | alert-processor | Total attempts, including the first, before dead-lettering. |
+| `ALERT_INITIAL_BACKOFF_MS` | `100` | alert-processor | First retry delay. |
+| `ALERT_BACKOFF_MULTIPLIER` | `3` | alert-processor | Exponential backoff factor. |
+| `ALERT_MAX_BACKOFF_MS` | `5000` | alert-processor | Backoff cap. |
+| `DLQ_TOPIC` | `zone.degradations.dlq` | alert-processor | Dead letter destination. |
+| `ZONE_STATE_IDLE_TTL_MS` | `900000` | stream-processor | Event-time idleness before in-memory zone state is evicted. Must exceed the 5m window. |
+| `ZONE_STATE_SWEEP_INTERVAL_MS` | `60000` | stream-processor | Minimum event-time between eviction sweeps. |
+
+`H3_RESOLUTION` and `H3_COARSE_RESOLUTION` are already live in `stream-processor/src/spatial.ts`;
+WP0 computes and stores the cells, WP1 consumes them.
