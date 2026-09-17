@@ -23,8 +23,10 @@ separates a defended decision from an arbitrary one.
 | ADR | Title | Written in |
 |---|---|---|
 | ADR-000 | Delivery semantics for alert persistence, and what happens on failure | WP0 ✅ |
-| ADR-001 | H3 vs geohash vs k-d tree | WP1 |
+| ADR-001 | H3 hex cells for adjacency, over geohash, spatial trees and raw distance | WP1 ✅ |
 | ADR-002 | Time-aware connectivity strategy | WP2 |
 | ADR-003 | Incident identity, merge and split semantics | WP2 |
 | ADR-004 | Partitioning on coarse H3 cells | WP3 |
 | ADR-005 | Simulated event time: one virtual clock, bounded per-zone lag, adjustable speed | WP6a ✅ |
+| ADR-006 | Ground truth by construction: one severity function, two thresholds | WP6a ✅ |
+| ADR-007 | A Kafka record timestamp is not application event time | S2c ✅ |
