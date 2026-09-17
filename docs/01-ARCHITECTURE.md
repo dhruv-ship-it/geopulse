@@ -356,3 +356,22 @@ problem does not exist.
 
 `H3_RESOLUTION` and `H3_COARSE_RESOLUTION` are already live in `stream-processor/src/spatial.ts`;
 WP0 computes and stores the cells, WP1 consumes them.
+
+### 7.2 Added in S2a (D8 + infra)
+
+| Variable | Default | Service | Meaning |
+|---|---|---|---|
+| `SIM_START_EPOCH_MS` | `1768478400000` | sensor-simulator | Simulated epoch a run starts at (2026-01-15T12:00:00Z). Fixed, so runs are comparable. |
+| `SIM_STEP_MS` | `1000` | sensor-simulator | Simulated ms per tick. One event per zone per tick, so this is the sample interval. |
+| `SPEED_MULTIPLIER` | `1` | sensor-simulator | Simulated ms per real ms. 60 = a simulated minute every real second. Changes how long a run takes, never what it contains. |
+| `REDIS_PASSWORD` | `geopulse-dev` | all Redis clients | Must match `--requirepass` in `infra/docker-compose.yml`. A dev credential whose purpose is loud failure, not secrecy. |
+
+`EVENTS_PER_SECOND` was **removed**: it meant timer firings per real second, conflating sampling
+density with simulation speed. The real event rate is derived —
+`NUM_ZONES × (1000 / SIM_STEP_MS) × SPEED_MULTIPLIER` per real second.
+
+**Host ports changed.** Redis `6380 → 6390`, Postgres `5432 → 5434`. Both defaults were held by
+other projects on the dev machine, and 5433 (the first replacement considered for Postgres) turned
+out to be taken as well. Moving a port only relocates a collision; the guard is authentication,
+which is why Redis now requires a password — a service pointed at the wrong Redis fails `AUTH`
+instead of silently sharing another project's keyspace.
