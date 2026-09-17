@@ -7,7 +7,7 @@ import {
   ScenarioType,
   ZoneConfig
 } from './types';
-import { MIN_AFFECTED_SEVERITY, severityAt, centreAt } from './anomaly';
+import { MIN_AFFECTED_SEVERITY, ONSET_SEVERITY, severityAt, centreAt } from './anomaly';
 import { haversineKm, LatLon } from './geo';
 import { LoadGenerator } from './loadGenerator';
 
@@ -18,8 +18,9 @@ import { LoadGenerator } from './loadGenerator';
  * The labels are *derived*, not observed and not hand-written. For every zone, on the same tick
  * grid the generator emits on, at the same instant the generator evaluates load at, we call the
  * same `severityAt` the generator calls. A zone is affected by an anomaly when that anomaly
- * drove it past MIN_AFFECTED_SEVERITY; its onset is the first event timestamp at which that was
- * true, and its peak severity is the maximum reached.
+ * drove its severity past MIN_AFFECTED_SEVERITY at some point; its onset is the first event
+ * timestamp at which the zone's load could already have been degrading (ONSET_SEVERITY), which
+ * is earlier and is the instant time-to-detect should be measured from.
  *
  * This is the property the whole measurement rests on, so it is worth stating plainly: the
  * ground truth cannot disagree with the event stream, because it is computed from the same
@@ -96,12 +97,27 @@ export function deriveGroundTruth(options: GroundTruthOptions): GroundTruthRecor
         if (severity > peakSeverity) {
           peakSeverity = severity;
         }
-        if (onsetEventTime < 0 && severity >= MIN_AFFECTED_SEVERITY) {
+        if (onsetEventTime < 0 && severity >= ONSET_SEVERITY) {
           onsetEventTime = eventTime;
         }
       }
 
-      if (onsetEventTime >= 0) {
+      // A zone whose severity peaked between the two thresholds is neither clearly taken over
+      // nor clearly untouched: it would degrade on some ticks and not others, and whichever way
+      // it were labelled it would be wrong about half the time. The severity floor in
+      // anomaly.ts is designed so this cannot happen, so reaching it means a scenario parameter
+      // has moved somewhere it should not have. Refuse to emit ambiguous labels rather than
+      // quietly cap the precision every later measurement can reach.
+      if (peakSeverity >= ONSET_SEVERITY && peakSeverity < MIN_AFFECTED_SEVERITY) {
+        throw new Error(
+          `${spec.anomalyId} leaves ${zone.zoneId} at peak severity ` +
+            `${peakSeverity.toFixed(4)}, between the onset threshold ` +
+            `${ONSET_SEVERITY.toFixed(4)} and the membership cut ${MIN_AFFECTED_SEVERITY}; ` +
+            'the labels for this run would be ambiguous'
+        );
+      }
+
+      if (peakSeverity >= MIN_AFFECTED_SEVERITY) {
         affectedZones.push({
           zoneId: zone.zoneId,
           onsetEventTime,

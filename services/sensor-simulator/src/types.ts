@@ -8,6 +8,18 @@ export interface SensorEvent {
   producedAt: number;
 }
 
+/**
+ * Peak-to-peak sensor jitter, as a fraction of the reported load: a value is drawn from
+ * +/- SENSOR_NOISE_FACTOR/2 around the true level.
+ *
+ * It lives here rather than inside LoadGenerator because two modules need it and neither may
+ * import the other: the generator applies it, and the ground-truth deriver has to know its
+ * bound to decide the earliest instant a zone's load could have crossed a threshold. Copying
+ * the number into both would be a silent-drift hazard in exactly the code whose whole job is
+ * not to drift.
+ */
+export const SENSOR_NOISE_FACTOR = 0.1;
+
 export interface ZoneConfig {
   zoneId: string;
   latitude: number;

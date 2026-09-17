@@ -1,5 +1,5 @@
 import { v5 as uuidv5 } from 'uuid';
-import { SensorEvent, ZoneConfig, ScenarioType, AnomalySpec } from './types';
+import { SensorEvent, ZoneConfig, ScenarioType, AnomalySpec, SENSOR_NOISE_FACTOR } from './types';
 import { combinedSeverity } from './anomaly';
 
 /**
@@ -11,7 +11,7 @@ import { combinedSeverity } from './anomaly';
  * re-derivable (CLAUDE.md rule 3).
  */
 export class LoadGenerator {
-  private static readonly NOISE_FACTOR = 0.1; // 10% deterministic "noise"
+  private static readonly NOISE_FACTOR = SENSOR_NOISE_FACTOR;
   private static readonly SPIKE_MULTIPLIER = 3.0;
   private static readonly DROP_MULTIPLIER = 0.2;
 
@@ -54,19 +54,41 @@ export class LoadGenerator {
     const producedAt = simNowMs;
     const eventTimestamp = simNowMs - this.sensorLagMs(zone.zoneId);
 
-    const baseLoad = this.calculateLoadForScenario(zone.baseLoad, scenario, eventTimestamp);
-    const realisticLoad = this.addRealisticVariation(baseLoad, zone.zoneId, eventTimestamp);
-    const finalLoad = this.applyAnomalies(realisticLoad, zone, eventTimestamp, anomalies);
+    const finalLoad = this.loadAt(zone, scenario, eventTimestamp, anomalies);
 
     return {
       eventId: this.eventId(zone.zoneId, eventTimestamp),
       zoneId: zone.zoneId,
       latitude: zone.latitude,
       longitude: zone.longitude,
-      load: parseFloat(finalLoad.toFixed(3)),
+      load: finalLoad,
       eventTimestamp,
       producedAt
     };
+  }
+
+  /**
+   * The load this zone reports for an event stamped at `eventTimestamp`: baseline profile, then
+   * the daily pattern and sensor jitter, then whatever the injected faults are doing to it.
+   *
+   * Split out of `generateEvent` because the load is the only part anything else wants. The
+   * ground-truth checks replay millions of ticks purely to see what the load did, and building
+   * a v5 UUID for each one to throw it away cost more than the whole rest of the calculation.
+   */
+  static loadAt(
+    zone: ZoneConfig,
+    scenario: ScenarioType,
+    eventTimestamp: number,
+    anomalies: readonly AnomalySpec[] = []
+  ): number {
+    const baseLoad = this.calculateLoadForScenario(zone.baseLoad, scenario, eventTimestamp);
+    const realisticLoad = this.addRealisticVariation(baseLoad, zone.zoneId, eventTimestamp);
+    const finalLoad = this.applyAnomalies(realisticLoad, zone, eventTimestamp, anomalies);
+
+    // Rounded here rather than at the call site, so this function returns exactly the number
+    // the event carries. A caller checking "did this zone degrade" against an unrounded value
+    // would disagree with the emitted event on any tick that rounds across the threshold.
+    return parseFloat(finalLoad.toFixed(3));
   }
 
   /**

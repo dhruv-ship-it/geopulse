@@ -1,4 +1,4 @@
-import { AnomalySpec, ZoneConfig } from './types';
+import { AnomalySpec, ZoneConfig, SENSOR_NOISE_FACTOR } from './types';
 import { haversineKm, destinationPoint, LatLon } from './geo';
 
 /**
@@ -46,10 +46,33 @@ export const CORE_FRACTION = 0.85;
  * sliver of the skirt is nudged but not degraded, and is deliberately left unlabelled. The
  * record still carries radiusKm as the geometric parameter; affectedZones is the claim.
  *
- * None of this is assumed — groundTruth.consistency.test.ts asserts against the emitted stream
- * that every labelled zone sustains a degrading load and no unlabelled zone does.
+ * None of this is assumed — groundTruth.test.ts asserts against the emitted stream that every
+ * labelled zone sustains a degrading load and no unlabelled zone does.
  */
 export const MIN_AFFECTED_SEVERITY = 0.85;
+
+/**
+ * The load at which a zone counts as degrading. Mirrors `THRESHOLD_STRESSED` in
+ * stream-processor/src/stateMachine.ts; if that moves, this moves with it.
+ */
+export const DEGRADING_LOAD = 0.75;
+
+/**
+ * The severity at which a zone's *onset* is recorded — a separate job from deciding membership,
+ * and the two need separate thresholds.
+ *
+ * Membership asks "did this anomaly take the zone over", and MIN_AFFECTED_SEVERITY answers it.
+ * Onset asks "from when was it showing", and answering that with the membership cut is wrong in
+ * a way that matters: severity climbs through the ramp, so a zone's load crosses the degradation
+ * threshold roughly twelve seconds before severity reaches 0.85. Labelling the later instant
+ * would shorten every measured time-to-detect by that much — a bias in the flattering
+ * direction, in the one metric this project has least room to be generous about.
+ *
+ * So onset is pinned to the earliest instant the zone's load *could* have crossed DEGRADING_LOAD,
+ * which given the sensor's bounded jitter is a severity of DEGRADING_LOAD / (1 + noise/2). Any
+ * error is then in the conservative direction: the label can be a tick or two early, never late.
+ */
+export const ONSET_SEVERITY = DEGRADING_LOAD / (1 + SENSOR_NOISE_FACTOR / 2);
 
 /** Where the anomaly's centre is at simulated time `t`. Stationary unless it propagates. */
 export function centreAt(spec: AnomalySpec, t: number): LatLon {
