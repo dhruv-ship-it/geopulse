@@ -435,7 +435,7 @@ A lead worth testing first, because the numbers fit too well to ignore:
 - Sensor lag is bounded at 20ms, so zones should be within 20ms of each other in event time.
   A 22-minute spread is not the simulator - it is the consumer draining 12 partitions at
   different rates.
-- ZoneStateStore.record advances \`watermark\` as a GLOBAL MAX over all zones, but zones live on
+- ZoneStateStore.record advances its watermark as a GLOBAL MAX over all zones, but zones live on
   12 partitions that progress independently. A zone on a lagging partition therefore sits
   permanently behind a watermark driven by the leading partition, lands past the idle cutoff,
   and is evicted - then re-evicted on the next sweep, because the leading partition keeps
@@ -466,8 +466,8 @@ confirm degradations are actually emitted.
 Write ADR-007 on the watermark decision if the fix lands: why minimum and not maximum, and what
 the cost is (the whole pipeline advances at the slowest partition).
 
-Commit incrementally. Update docs/STATUS.md: D10 status, and whether WP6b is unblocked.\`,
-m:\`<p><span class="flag">Verification gate — do not start S3 on a zero</span></p>
+Commit incrementally. Update docs/STATUS.md: D10 status, and whether WP6b is unblocked.`,
+m:`<p><span class="flag">Verification gate — do not start S3 on a zero</span></p>
 <pre># terminal 1
 cd services/stream-processor &amp;&amp; npm run dev
 # terminal 2
@@ -475,7 +475,7 @@ cd services/sensor-simulator &amp;&amp; SCENARIO=regional-anomaly NUM_ZONES=400 
 
 # did anything actually come out?
 docker exec geopulse-kafka kafka-run-class kafka.tools.GetOffsetShell   --broker-list localhost:9092 --topic zone.degradations</pre>
-<p>Expect a non-zero offset sum, and roughly <strong>62 zones</strong> degrading for the seed-42 regional anomaly — that is the labelled count from WP6a, so the stream and the ground truth should agree.</p>\`},
+<p>Expect a non-zero offset sum, and roughly <strong>62 zones</strong> degrading for the seed-42 regional anomaly — that is the labelled count from WP6a, so the stream and the ground truth should agree.</p>`},
 
 {id:"S3",wp:"WP1",t:"H3 spatial layer",est:"40–60m",stage:0,
 p:`Read docs/STATUS.md, then docs/02-PHASE-1-CORRELATION.md WP1.
