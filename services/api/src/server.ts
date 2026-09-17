@@ -24,17 +24,16 @@ app.use((req, res, next) => {
   
   // Hook into response finish to record metrics
   res.on('finish', () => {
-    console.log(' METRICS FIRED:', req.method, req.path, res.statusCode);
     const duration = Date.now() - (req as any).startTime;
     const route = normalizeRoute(req.path);
-    
-    // Increment request counter
+
     httpRequestsTotal.labels(req.method, route, res.statusCode.toString()).inc();
-    
-    // Observe request duration
     httpRequestDurationMs.labels(req.method, route).observe(duration);
-    
-    console.log(' Metrics recorded:', { method: req.method, route, status: res.statusCode, duration });
+
+    logger.debug(
+      { requestId: (req as any).id, method: req.method, route, status: res.statusCode, duration },
+      'Request completed'
+    );
   });
   
   next();
