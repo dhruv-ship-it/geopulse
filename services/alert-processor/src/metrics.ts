@@ -18,6 +18,20 @@ export const alertsPersistedTotal = new Counter({
   registers: [register]
 });
 
+export const alertsDeadLetteredTotal = new Counter({
+  name: 'alerts_dead_lettered_total',
+  help: 'Alerts routed to the dead letter queue after recovery was exhausted',
+  labelNames: ['reason'],
+  registers: [register]
+});
+
+export const alertRetriesTotal = new Counter({
+  name: 'alert_retries_total',
+  help: 'Retry attempts made after a failed alert persistence',
+  labelNames: [],
+  registers: [register]
+});
+
 // Histograms
 export const redisAlertWriteLatencyMs = new Histogram({
   name: 'redis_alert_write_latency_ms',

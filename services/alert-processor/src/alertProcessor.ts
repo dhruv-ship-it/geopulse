@@ -19,15 +19,19 @@ export class AlertProcessor {
   }
 
   /**
-   * Persist alert into Redis (Phase 4) and PostgreSQL (Phase 5)
-   * Dual-write pattern: both writes happen independently
+   * Persist an alert to PostgreSQL (durable) and Redis (recent-alerts cache).
+   *
+   * Postgres goes first, deliberately. The Postgres write is the one that is allowed to fail
+   * the whole message, and a failure means the consumer retries and eventually replays this
+   * call. Writing Redis first would LPUSH a duplicate entry onto the recent-alerts lists on
+   * every retry. Ordering it second means a retry never duplicates a Redis entry for a write
+   * that never became durable.
+   *
+   * Redis stays best-effort: it is a cache of recent alerts, Postgres is the record.
    */
   async persistAlert(alert: ZoneAlert): Promise<void> {
-    // Phase 4: Persist to Redis (unchanged behavior)
-    await this.persistToRedis(alert);
-
-    // Phase 5: Persist to PostgreSQL for historical analytics
     await this.persistToPostgres(alert);
+    await this.persistToRedis(alert);
   }
 
   /**
@@ -91,7 +95,10 @@ export class AlertProcessor {
       logger.info({ zoneId: alert.zoneId, storage: 'postgres' }, 'Alert persisted');
     } catch (err) {
       logger.error({ error: err, zoneId: alert.zoneId }, 'Failed to persist alert to PostgreSQL');
-      throw err; // Fail loudly for PostgreSQL - this is for compliance/audit
+      // Rethrow. This propagates out of eachMessage, which is what stops kafkajs committing
+      // the offset; the consumer then retries and, if that fails too, dead-letters the
+      // message. See messageRecovery.ts.
+      throw err;
     }
   }
 }
