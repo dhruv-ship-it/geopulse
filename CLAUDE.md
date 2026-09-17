@@ -95,7 +95,8 @@ services/
   stream-processor/          per-zone windows + state machine -> Redis, Kafka
   alert-processor/           alert persistence (Redis + Postgres) + DLQ
   api/                       Express read API
-  correlation-engine/        [PHASE 1 - NEW] spatial correlation -> incidents
+  correlation-engine/        [PHASE 1] src/core/ is the pure correlation core (window,
+                             connectivity, oracle); the Kafka/Redis service around it is WP3
 docs/                        this documentation set
 docs/adr/                    architecture decision records
 benchmarks/                  committed benchmark scripts + raw results
@@ -109,7 +110,7 @@ cd infra && docker-compose up -d                        # start kafka/redis/post
 cd tools/kafka-bootstrap && npm install && npm run bootstrap   # create topics (run once, after compose)
 cd packages/spatial && npm install                      # builds dist/ via prepare; do this first
 cd services/<svc> && npm install && npm run dev
-cd services/<svc> && npm test                           # jest; all four services have tests
+cd services/<svc> && npm test                           # jest; every service has tests
 cd services/alert-processor && GEOPULSE_INTEGRATION=1 npm test  # end-to-end, needs the stack up
 ./benchmarks/run-coverage.sh                            # coverage across every service
 ```

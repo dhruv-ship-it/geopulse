@@ -10,10 +10,10 @@
 | Field | Value |
 |---|---|
 | **Phase** | Phase 1 — Spatiotemporal Incident Correlation |
-| **Active work package** | S3 done — **WP1 complete**. WP2 is unblocked and is next. WP6b still waits on WP3. |
-| **Last updated** | 2026-09-17 |
-| **Last commit at time of writing** | `4be3615` |
-| **Blocked on** | **Nothing.** D10 is closed and verified end to end, and WP1 has given WP2 a neighbour graph to build components over. |
+| **Active work package** | S4 done — **WP2a complete** (`CorrelationWindow`, `TimeAwareConnectivity`, the naive oracle, the differential fuzz). **WP2b is next**: `IncidentLifecycle`. WP6b still waits on WP3. |
+| **Last updated** | 2026-09-18 |
+| **Last commit at time of writing** | `2f843c5` |
+| **Blocked on** | **Nothing.** The correlation core is in place and proven against its oracle; WP2b builds incidents on top of the component partition it produces. |
 
 **Decisions locked in (do not re-litigate without the owner):**
 - Scope is idea ① (spatial correlation) only. Ideas ②–⑤ are deferred to `06-FUTURE-PHASES.md`.
@@ -30,7 +30,8 @@
 |---|---|---|---|
 | WP0 | Foundation & defect cleanup | ☑ Done | D1, D2, D4, D5 closed, plus D7. D3 deferred as planned. All four acceptance criteria verified against live Kafka/Redis/Postgres. Understanding checkpoint still owed. |
 | WP1 | Spatial layer (H3 neighbour graph) | ☑ Done | `@geopulse/spatial` — `NeighbourGraph` plus the cells module moved out of stream-processor. All three acceptance criteria met: lookup flat at 0.58→1.03 µs across 1k→100k zones against 39.6→4630.7 µs for a naive scan; antimeridian, polar and pentagon tests; ADR-001. Understanding checkpoint still owed. |
-| WP2 | Correlation core (time-aware connectivity) | ☐ Not started | **The deep one, and the next one.** Budget the most time here. Was blocked by D8; unblocked as of S2a, and WP1 has landed the adjacency it builds on. |
+| WP2a | Correlation core — window + connectivity | ☑ Done | `CorrelationWindow`, `TimeAwareConnectivity` (union-find + local rebuild), `NaiveConnectivity` (the oracle), and the differential fuzz. Acceptance met: **11,000 sequences / 551,871 operations, 0 divergences**. ADR-002. Understanding checkpoint still owed. |
+| WP2b | Correlation core — `IncidentLifecycle` | ☐ Not started | **Next.** OPENED / GREW / MERGED / SHRANK / CLOSED, split policy, deterministic incident ids, property tests, ADR-003. Items 3–5 of `02-PHASE-1-CORRELATION.md` WP2. |
 | WP3 | `correlation-engine` service | ☐ Not started | |
 | WP4 | Propagation vector | ☐ Not started | |
 | WP5 | API + live map UI | ☐ Not started | |
@@ -52,7 +53,7 @@ truly complete when both are ticked.
 |---|---|---|
 | WP0 | ☐ — questions in `02-PHASE-1-CORRELATION.md` WP0; ADR-000 answers the first two | |
 | WP1 | ☐ — questions at the end of the S3 log entry; ADR-001 answers most of them in prose, so answer closed-book first | |
-| WP2 | ☐ | |
+| WP2a | ☐ — questions at the end of the S4 log entry; ADR-002 answers several in prose, so answer closed-book first | |
 | WP3 | ☐ | |
 | WP4 | ☐ | |
 | WP6a | ☐ — questions at the end of the S2b log entry | |
@@ -65,8 +66,8 @@ truly complete when both are ticked.
 |---|---|---|
 | ADR-000 | Delivery semantics for alert persistence, and what happens on failure | ☑ Written (WP0) |
 | ADR-001 | H3 hex cells for adjacency, over geohash, spatial trees and raw distance | ☑ Written (WP1) |
-| ADR-002 | Time-aware connectivity strategy | ☐ Not written |
-| ADR-003 | Incident identity, merge and split semantics | ☐ Not written |
+| ADR-002 | Incremental union-find with local rebuild on expiry | ☑ Written (WP2a) |
+| ADR-003 | Incident identity, merge and split semantics | ☐ Not written (WP2b) |
 | ADR-004 | Partitioning on coarse H3 cells | ☐ Not written |
 | ADR-005 | Simulated event time: virtual clock, bounded lag, speed multiplier | ☑ Written (S2a) |
 | ADR-006 | Ground truth by construction: one severity function, two thresholds | ☑ Written (S2b) |
@@ -80,11 +81,12 @@ truly complete when both are ticked.
 
 | Metric | Value | Scenario / config | Source file | Date |
 |---|---|---|---|---|
-| Test coverage, packages/spatial | 97.89% stmts | whole src tree, `./benchmarks/run-coverage.sh` | `benchmarks/results/wp1-coverage.txt` | 2026-09-17 |
-| Test coverage, sensor-simulator | 72.07% stmts | whole src tree; was 51.86% at WP0 | `benchmarks/results/wp1-coverage.txt` | 2026-09-17 |
-| Test coverage, stream-processor | 37.07% stmts | whole src tree; was 38.18% — `cells.ts` left for the package | `benchmarks/results/wp1-coverage.txt` | 2026-09-17 |
-| Test coverage, alert-processor | 46.87% stmts | whole src tree, integration suite skipped | `benchmarks/results/wp1-coverage.txt` | 2026-09-17 |
-| Test coverage, api | 18.91% stmts | whole src tree | `benchmarks/results/wp1-coverage.txt` | 2026-09-17 |
+| Test coverage, correlation-engine | 100% stmts, 98.5% branches | whole src tree, `./benchmarks/run-coverage.sh`; 103 tests | `benchmarks/results/wp2-coverage.txt` | 2026-09-18 |
+| Test coverage, packages/spatial | 97.89% stmts | whole src tree, `./benchmarks/run-coverage.sh` | `benchmarks/results/wp2-coverage.txt` | 2026-09-18 |
+| Test coverage, sensor-simulator | 72.07% stmts | whole src tree; was 51.86% at WP0 | `benchmarks/results/wp2-coverage.txt` | 2026-09-18 |
+| Test coverage, stream-processor | 37.07% stmts | whole src tree; was 38.18% — `cells.ts` left for the package | `benchmarks/results/wp2-coverage.txt` | 2026-09-18 |
+| Test coverage, alert-processor | 46.87% stmts | whole src tree, integration suite skipped | `benchmarks/results/wp2-coverage.txt` | 2026-09-18 |
+| Test coverage, api | 18.91% stmts | whole src tree | `benchmarks/results/wp2-coverage.txt` | 2026-09-18 |
 | Simulator event-time rate | 1.000× real time | 20 zones, `SIM_STEP_MS=1000`, `SPEED_MULTIPLIER=1` | `benchmarks/results/d8-simulator-event-clock-after.txt` | 2026-09-17 |
 | Zone-to-zone event-time divergence | 0 ms over 60 s (spread bounded at ≤ 20 ms) | as above; was 5681 ms before the fix | `benchmarks/results/d8-simulator-event-clock-after.txt` | 2026-09-17 |
 | Wall clock per 60 s confirmation window | 60.00 s at 1×, 1.00 s at 60× | as above | `benchmarks/results/d8-simulator-event-clock-after.txt` | 2026-09-17 |
@@ -107,9 +109,14 @@ truly complete when both are ticked.
 | H3 res-5 cell area spread | 156.4–305.1 km², ratio 1.95; 12 pentagons, the first 127.8 km² | as above | `benchmarks/results/wp1-neighbour-graph.txt` | 2026-09-17 |
 | What one-ring adjacency means on the ground | non-adjacent from 9.2 km; still adjacent at 31.7 km | 1200 zones in a 200 km square, equatorial | `benchmarks/results/wp1-neighbour-graph.txt` | 2026-09-17 |
 | Cell adjacency vs a true 25 km circle | recall 62.7–75.6%, precision 85.7–96.4% | constant-density fields, 1k–100k | `benchmarks/results/wp1-neighbour-graph.txt` | 2026-09-17 |
+| **Differential fuzz divergences, optimised vs naive** | **0** | 11,000 sequences, seed 42: 10,000 random-graph + 1,000 over the real H3 graph + 1,000 reach-measuring | `benchmarks/results/wp2-differential-fuzz.txt` | 2026-09-18 |
+| Differential fuzz operations compared | 551,871 events, 551,871 partition comparisons | as above; partitions compared after *every* operation, not at the end | `benchmarks/results/wp2-differential-fuzz.txt` | 2026-09-18 |
+| What the fuzz actually reached | 7,732 component splits, 110,754 expiries, 21,089 early recoveries, 5,305 full teardowns, largest component 28 | as above | `benchmarks/results/wp2-differential-fuzz.txt` | 2026-09-18 |
+| Fuzz wall clock | ~11 s for the whole suite | node v20.14.0, win32 x64, one machine; the core has no I/O, which is why this is cheap enough to keep in `npm test` | `benchmarks/results/wp2-differential-fuzz.txt` | 2026-09-18 |
 
-Re-run coverage with `./benchmarks/run-coverage.sh`, and the WP1 rows with the command in the
-header of `benchmarks/neighbour-graph.ts`. The coverage figures are low and they are honest — the previous
+Re-run coverage with `./benchmarks/run-coverage.sh`, the WP1 rows with the command in the
+header of `benchmarks/neighbour-graph.ts`, and the WP2 rows with
+`cd services/correlation-engine && npx jest differentialFuzz --verbose`. The coverage figures are low and they are honest — the previous
 "90%+" figure was scoped to two hand-picked files. **Do not put a coverage number on the resume**
 (`05-RESUME.md` §5 already says to drop it); these rows exist so the claim is traceable if asked.
 
@@ -138,6 +145,98 @@ Tracked from `01-ARCHITECTURE.md` §3.
 ## Session log
 
 Append one entry per working session. Newest at the top. Keep to 2–4 lines.
+
+### 2026-09-18 — S4: WP2a (correlation core — window + connectivity)
+
+- **WP2a done.** `CorrelationWindow` (event-time membership), `TimeAwareConnectivity`
+  (incremental union-find + local rebuild), `NaiveConnectivity` (the oracle) and the
+  differential fuzz. 103 tests, 100% statements over the core. **`IncidentLifecycle` is
+  deliberately not here** — that is WP2b, per the roadmap.
+- **The thing union-find cannot do, and what we do instead.** Union-find is the right structure
+  for arrivals and has no delete — not as an oversight, but because it is fast *precisely* by
+  discarding which edge merged two elements. Our members expire, so delete is not optional. The
+  resolution: union-find on the arrival path (path compression, union by rank), and on removal
+  tear down **only the components that lost a member** and rediscover each with a BFS over its
+  survivors. Cost is O(V+E) over affected components, not over the active set. Justified by two
+  facts about the workload rather than in the abstract — a degrading zone refreshes ~120 times
+  per expiry (1 s samples, 120 s window), and a component is tens of zones out of thousands —
+  and both are instrumented (`rebuilds`, `rebuiltMembers`, `maxRank`) so the assumption is
+  measurable rather than asserted.
+- **The circular member list is the piece that makes it work.** Union-find knows whether two
+  zones are together but not *who else* is in there with them, and the rebuild needs exactly the
+  survivors. Each node carries a `next` pointer forming one cycle per component; `union` splices
+  two cycles in two pointer writes, O(1), independent of which root union by rank picked. The
+  obvious alternative, `Map<root, Set<member>>`, has to move a set on every union.
+- **Rebuild sorts its survivors before the BFS.** O(k log k) on a small set, and it buys the
+  property everything else leans on: a rebuilt component is a function of *who survived* and the
+  current adjacency, never of the merge history of the component it replaced. Replay is therefore
+  exact, and a rebuilt component is indistinguishable from one built fresh — asserted directly.
+- **Acceptance met: 11,000 sequences, 551,871 operations, 0 divergences.** Both implementations
+  answer one `Connectivity` interface, are driven through **one** shared `CorrelationWindow` with
+  an identical call sequence, and their partitions are compared **after every operation** — a
+  stale parent pointer can sit invisible for twenty operations before it decides a merge, and
+  comparing only final state lets a later rebuild mask the bug it happened to fix. Evidence:
+  `benchmarks/results/wp2-differential-fuzz.txt`. The seed is pinned, so a failure reproduces
+  exactly instead of being filed as flakiness.
+- **The fuzz was nearly worthless and nothing would have said so.** fast-check biases array
+  lengths small, so the first version averaged **five events per sequence** — most of those
+  10,000 sequences never built a multi-zone component at all, and it passed. Fixed with
+  `size: 'max'` plus a minimum length, and then a second property was added that asserts what
+  the generator actually *reaches*: 7,732 component splits, 110,754 expiries, 21,089 early
+  recoveries, 5,305 full teardowns, largest component 28. Floors sit well below current output,
+  so a future change that guts the generator fails there rather than passing everywhere. This is
+  the general failure mode of fuzz testing and it is worth being able to describe.
+- **1,000 of those sequences run over the real WP1 `NeighbourGraph`**, not only over random
+  graphs, and the symmetry that `AdjacencyProvider` documents — and that the incremental hot path
+  depends on, since it only ever unions a joining zone against its own neighbour list — is
+  asserted over a real 36-zone field rather than assumed.
+- **The caveats are tested, not commented.** A degradation whose whole window already lies behind
+  the watermark is refused rather than admitted as a phantom member for one compaction interval.
+  An edge the graph learns after both endpoints last degraded is missed until one re-degrades —
+  one-directional (it can only miss a merge, never invent one) and it heals within a sample
+  interval. `representativeOf` is diagnostics only, and a test pins that it really does move, so
+  nothing downstream is tempted to key on it.
+- **Determinism guarded by a test, not by discipline.** The suite greps the core for `Date.now`,
+  `Math.random`, `new Date` and `process.hrtime`, so rule 3 fails the build rather than quietly
+  making two benchmark runs disagree by a few percent and getting blamed on the machine.
+- **ADR-002 written**, including the alternative worth naming: fully dynamic connectivity
+  (Holm–de Lichtenberg–Thorup, link-cut / Euler-tour trees) at O(log² n) amortised, rejected as
+  more intricate machinery than a few-dozen-vertex rebuild justifies — with an explicit trigger
+  for revisiting it.
+- **Next:** WP2b — `IncidentLifecycle`, merge and split policy, deterministic incident ids,
+  property tests, ADR-003. Owner owes the WP0, WP6a, WP1 and now WP2a understanding checkpoints.
+
+#### WP2a understanding checkpoint — questions owed
+
+Answer these without looking at the code. The first five are the WP2 questions from
+`02-PHASE-1-CORRELATION.md` that WP2a covers; the rest came out of this session. ADR-002 answers
+several of them in prose, so answer closed-book first.
+
+1. Walk through union-find with path compression and union by rank. What is the amortised
+   complexity, and what is α?
+2. Why can't you just delete from a union-find? Answer at the level of *what information the
+   structure threw away*, not "there's no delete method".
+3. How do you know your optimised connectivity is correct? Say why differential testing against
+   an oracle is stronger evidence than unit tests alone — and what it still does not prove.
+4. Why is the naive full-recompute implementation not dead code, and what would be lost by
+   deleting it once the fast one works?
+5. Name the structure that *does* make deletion cheap, state its complexity, and say why you did
+   not need it. Then say what would have to change for you to need it.
+6. Why does each node carry a `next` pointer? What would the obvious alternative cost, and why
+   does it interact badly with union by rank specifically?
+7. Why does the rebuild sort its survivors before the BFS, given that sorting is strictly extra
+   work? What property would be lost without it?
+8. The differential fuzz initially averaged five events per sequence and passed. Why did nothing
+   catch that, and what is now in place so it cannot happen quietly again?
+9. Why is the fuzz seed pinned rather than drawn fresh each run? Give the argument *against*
+   pinning too, and say why it loses.
+10. A degradation arrives whose event time is older than `CORRELATION_WINDOW_MS` behind the
+    watermark. What happens to it, and what goes wrong if you admit it instead?
+11. `representativeOf` returns a union-find root. Why must nothing downstream use it as an
+    incident id? Describe the concrete sequence that changes it while the component's membership
+    is unchanged.
+12. Why must the adjacency relation be symmetric? Name the specific place the incremental path
+    and the oracle would disagree if it were not.
 
 ### 2026-09-17 — S3: WP1 (H3 neighbour graph)
 
