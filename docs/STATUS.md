@@ -77,10 +77,10 @@ truly complete when both are ticked.
 
 | Metric | Value | Scenario / config | Source file | Date |
 |---|---|---|---|---|
-| Test coverage, sensor-simulator | 36.70% stmts | whole src tree, `npx jest --coverage` | `benchmarks/results/wp0-coverage.txt` | 2026-09-17 |
-| Test coverage, stream-processor | 38.39% stmts | whole src tree | `benchmarks/results/wp0-coverage.txt` | 2026-09-17 |
-| Test coverage, alert-processor | 47.08% stmts | whole src tree, integration suite skipped | `benchmarks/results/wp0-coverage.txt` | 2026-09-17 |
-| Test coverage, api | 19.17% stmts | whole src tree | `benchmarks/results/wp0-coverage.txt` | 2026-09-17 |
+| Test coverage, sensor-simulator | 51.86% stmts | whole src tree, `npx jest --coverage` | `benchmarks/results/wp0-coverage.txt` | 2026-09-17 |
+| Test coverage, stream-processor | 38.18% stmts | whole src tree | `benchmarks/results/wp0-coverage.txt` | 2026-09-17 |
+| Test coverage, alert-processor | 46.87% stmts | whole src tree, integration suite skipped | `benchmarks/results/wp0-coverage.txt` | 2026-09-17 |
+| Test coverage, api | 18.91% stmts | whole src tree | `benchmarks/results/wp0-coverage.txt` | 2026-09-17 |
 | Simulator event-time rate | 1.000× real time | 20 zones, `SIM_STEP_MS=1000`, `SPEED_MULTIPLIER=1` | `benchmarks/results/d8-simulator-event-clock-after.txt` | 2026-09-17 |
 | Zone-to-zone event-time divergence | 0 ms over 60 s (spread bounded at ≤ 20 ms) | as above; was 5681 ms before the fix | `benchmarks/results/d8-simulator-event-clock-after.txt` | 2026-09-17 |
 | Wall clock per 60 s confirmation window | 60.00 s at 1×, 1.00 s at 60× | as above | `benchmarks/results/d8-simulator-event-clock-after.txt` | 2026-09-17 |
