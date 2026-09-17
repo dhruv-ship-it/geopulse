@@ -10,10 +10,10 @@
 | Field | Value |
 |---|---|
 | **Phase** | Phase 1 — Spatiotemporal Incident Correlation |
-| **Active work package** | S2c done — **D10 closed, WP6b unblocked**. WP1, WP2 and WP6b are all open. |
+| **Active work package** | S3 done — **WP1 complete**. WP2 is unblocked and is next. WP6b still waits on WP3. |
 | **Last updated** | 2026-09-17 |
-| **Last commit at time of writing** | `6b79093` |
-| **Blocked on** | **Nothing.** D10 is closed and verified end to end: the live pipeline emits all 62 expected degradations. |
+| **Last commit at time of writing** | `4be3615` |
+| **Blocked on** | **Nothing.** D10 is closed and verified end to end, and WP1 has given WP2 a neighbour graph to build components over. |
 
 **Decisions locked in (do not re-litigate without the owner):**
 - Scope is idea ① (spatial correlation) only. Ideas ②–⑤ are deferred to `06-FUTURE-PHASES.md`.
@@ -29,8 +29,8 @@
 | WP | Name | Status | Notes |
 |---|---|---|---|
 | WP0 | Foundation & defect cleanup | ☑ Done | D1, D2, D4, D5 closed, plus D7. D3 deferred as planned. All four acceptance criteria verified against live Kafka/Redis/Postgres. Understanding checkpoint still owed. |
-| WP1 | Spatial layer (H3 neighbour graph) | ☐ Not started | |
-| WP2 | Correlation core (time-aware connectivity) | ☐ Not started | **The deep one.** Budget the most time here. Was blocked by D8; unblocked as of S2a. |
+| WP1 | Spatial layer (H3 neighbour graph) | ☑ Done | `@geopulse/spatial` — `NeighbourGraph` plus the cells module moved out of stream-processor. All three acceptance criteria met: lookup flat at 0.58→1.03 µs across 1k→100k zones against 39.6→4630.7 µs for a naive scan; antimeridian, polar and pentagon tests; ADR-001. Understanding checkpoint still owed. |
+| WP2 | Correlation core (time-aware connectivity) | ☐ Not started | **The deep one, and the next one.** Budget the most time here. Was blocked by D8; unblocked as of S2a, and WP1 has landed the adjacency it builds on. |
 | WP3 | `correlation-engine` service | ☐ Not started | |
 | WP4 | Propagation vector | ☐ Not started | |
 | WP5 | API + live map UI | ☐ Not started | |
@@ -51,7 +51,7 @@ truly complete when both are ticked.
 | WP | Checkpoint passed | Date |
 |---|---|---|
 | WP0 | ☐ — questions in `02-PHASE-1-CORRELATION.md` WP0; ADR-000 answers the first two | |
-| WP1 | ☐ | |
+| WP1 | ☐ — questions at the end of the S3 log entry; ADR-001 answers most of them in prose, so answer closed-book first | |
 | WP2 | ☐ | |
 | WP3 | ☐ | |
 | WP4 | ☐ | |
@@ -64,7 +64,7 @@ truly complete when both are ticked.
 | ADR | Title | Status |
 |---|---|---|
 | ADR-000 | Delivery semantics for alert persistence, and what happens on failure | ☑ Written (WP0) |
-| ADR-001 | H3 vs geohash vs k-d tree | ☐ Not written |
+| ADR-001 | H3 hex cells for adjacency, over geohash, spatial trees and raw distance | ☑ Written (WP1) |
 | ADR-002 | Time-aware connectivity strategy | ☐ Not written |
 | ADR-003 | Incident identity, merge and split semantics | ☐ Not written |
 | ADR-004 | Partitioning on coarse H3 cells | ☐ Not written |
@@ -80,10 +80,11 @@ truly complete when both are ticked.
 
 | Metric | Value | Scenario / config | Source file | Date |
 |---|---|---|---|---|
-| Test coverage, sensor-simulator | 51.86% stmts | whole src tree, `npx jest --coverage` | `benchmarks/results/wp0-coverage.txt` | 2026-09-17 |
-| Test coverage, stream-processor | 38.18% stmts | whole src tree | `benchmarks/results/wp0-coverage.txt` | 2026-09-17 |
-| Test coverage, alert-processor | 46.87% stmts | whole src tree, integration suite skipped | `benchmarks/results/wp0-coverage.txt` | 2026-09-17 |
-| Test coverage, api | 18.91% stmts | whole src tree | `benchmarks/results/wp0-coverage.txt` | 2026-09-17 |
+| Test coverage, packages/spatial | 97.89% stmts | whole src tree, `./benchmarks/run-coverage.sh` | `benchmarks/results/wp1-coverage.txt` | 2026-09-17 |
+| Test coverage, sensor-simulator | 72.07% stmts | whole src tree; was 51.86% at WP0 | `benchmarks/results/wp1-coverage.txt` | 2026-09-17 |
+| Test coverage, stream-processor | 37.07% stmts | whole src tree; was 38.18% — `cells.ts` left for the package | `benchmarks/results/wp1-coverage.txt` | 2026-09-17 |
+| Test coverage, alert-processor | 46.87% stmts | whole src tree, integration suite skipped | `benchmarks/results/wp1-coverage.txt` | 2026-09-17 |
+| Test coverage, api | 18.91% stmts | whole src tree | `benchmarks/results/wp1-coverage.txt` | 2026-09-17 |
 | Simulator event-time rate | 1.000× real time | 20 zones, `SIM_STEP_MS=1000`, `SPEED_MULTIPLIER=1` | `benchmarks/results/d8-simulator-event-clock-after.txt` | 2026-09-17 |
 | Zone-to-zone event-time divergence | 0 ms over 60 s (spread bounded at ≤ 20 ms) | as above; was 5681 ms before the fix | `benchmarks/results/d8-simulator-event-clock-after.txt` | 2026-09-17 |
 | Wall clock per 60 s confirmation window | 60.00 s at 1×, 1.00 s at 60× | as above | `benchmarks/results/d8-simulator-event-clock-after.txt` | 2026-09-17 |
@@ -97,8 +98,18 @@ truly complete when both are ticked.
 | Live vs offline-replay prediction | exact match on zone counts and on last-STRESSED event time | as above | `benchmarks/results/d10-after-fix.txt` | 2026-09-17 |
 | Kafka segment deletions during a run | 64 before the D10 fix, 0 after | as above | `d10-root-cause.txt`, `d10-after-fix.txt` | 2026-09-17 |
 | Zone-state evictions | 0 across 400 zones / 5.76M events | as above, 15 min idle TTL | `benchmarks/results/d10-after-fix.txt` | 2026-09-17 |
+| `neighboursOf` latency, constant density | 0.58 µs @ 1k, 0.77 µs @ 10k, 1.03 µs @ 100k zones | res 5, ring 1, 25 zones per 100 km square, seed 42 | `benchmarks/results/wp1-neighbour-graph.txt` | 2026-09-17 |
+| Naive haversine scan, same fields | 39.6 µs @ 1k, 399.2 µs @ 10k, 4630.7 µs @ 100k | as above, 25 km radius | `benchmarks/results/wp1-neighbour-graph.txt` | 2026-09-17 |
+| Speedup, `neighboursOf` vs naive scan | 68× @ 1k, 521× @ 10k, 4484× @ 100k | as above | `benchmarks/results/wp1-neighbour-graph.txt` | 2026-09-17 |
+| `neighboursOf` latency, constant area | 0.70 µs @ 1k → 27.9 µs @ 100k, as the neighbourhood grows 7.6 → 771 zones | one 400 km square at every zone count | `benchmarks/results/wp1-neighbour-graph.txt` | 2026-09-17 |
+| Graph build time | 28 ms @ 1k, 64 ms @ 10k, 397 ms @ 100k zones | constant-density fields | `benchmarks/results/wp1-neighbour-graph.txt` | 2026-09-17 |
+| Hexagon neighbour equidistance, res 5 | furthest/nearest of the six = 1.045 median, 1.207 worst (square grid: exactly 1.4142) | 5000 cells sampled uniformly by area | `benchmarks/results/wp1-neighbour-graph.txt` | 2026-09-17 |
+| H3 res-5 cell area spread | 156.4–305.1 km², ratio 1.95; 12 pentagons, the first 127.8 km² | as above | `benchmarks/results/wp1-neighbour-graph.txt` | 2026-09-17 |
+| What one-ring adjacency means on the ground | non-adjacent from 9.2 km; still adjacent at 31.7 km | 1200 zones in a 200 km square, equatorial | `benchmarks/results/wp1-neighbour-graph.txt` | 2026-09-17 |
+| Cell adjacency vs a true 25 km circle | recall 62.7–75.6%, precision 85.7–96.4% | constant-density fields, 1k–100k | `benchmarks/results/wp1-neighbour-graph.txt` | 2026-09-17 |
 
-Re-run with `./benchmarks/run-coverage.sh`. These are low and they are honest — the previous
+Re-run coverage with `./benchmarks/run-coverage.sh`, and the WP1 rows with the command in the
+header of `benchmarks/neighbour-graph.ts`. The coverage figures are low and they are honest — the previous
 "90%+" figure was scoped to two hand-picked files. **Do not put a coverage number on the resume**
 (`05-RESUME.md` §5 already says to drop it); these rows exist so the claim is traceable if asked.
 
@@ -127,6 +138,72 @@ Tracked from `01-ARCHITECTURE.md` §3.
 ## Session log
 
 Append one entry per working session. Newest at the top. Keep to 2–4 lines.
+
+### 2026-09-17 — S3: WP1 (H3 neighbour graph)
+
+- **WP1 done.** `NeighbourGraph` answers "who is adjacent to this zone" out of a
+  `Map<cell, zoneId[]>` occupancy index and a cached `gridDisk`, so a lookup is a handful of
+  hash hits over 7 cells rather than any distance computation at all. `addZone` keeps it
+  incremental, because zones are discovered at runtime and a one-shot build would miss them
+  until a restart.
+- **It lives in `packages/spatial` (`@geopulse/spatial`), a `file:` dependency, not a copy.**
+  Two processes have to agree on this geometry — `stream-processor` writes a zone's cell at
+  registration, the correlation engine builds components out of it — and a disagreement is
+  silent rather than loud: res-5 and res-6 ids are both valid, just in different tilings, so
+  every lookup returns empty and the system calmly reports that nothing in the world is
+  correlated. The service's `spatial.ts` is deleted and it now compiles against the package, so
+  the sharing is real rather than aspirational. Cost: the package has to be built before a
+  consumer compiles, noted in `CLAUDE.md`.
+- **The graph is flat in the fleet size and the scan is linear**, which was the thing to prove:
+  0.58 → 1.03 µs across 1k → 100k zones against 39.6 → 4630.7 µs, a 4484× gap at 100k. Packing
+  the same 400 km square tighter instead *does* slow the graph down, 0.70 → 27.9 µs, because
+  the answer itself grows from 7.6 zones to 771 — it pays for the size of the answer, never for
+  the size of the search. Both series are committed; the second is the unflattering half and it
+  is the one that shows the cost model is understood.
+- **The benchmark caught something worth keeping.** Neighbour counts drifted 2.9 → 4.2 in a
+  series where the zone density was fixed. It tracks the mean area of the cells the field landed
+  in (188 → 257 km²): a res-5 cell is 156 km² in some parts of the world and 305 km² in others,
+  so the same sensor density gives different neighbourhood sizes depending on where on the
+  icosahedron the region sits. Now a measured column rather than a mystery. Placement also had
+  to scale longitude by 1/cos(lat), or the 100k field would have been 13% denser at its edges
+  than at its middle and part of the result would have been an artefact of the field.
+- **31 tests, including the cases that break naive schemes.** Antimeridian — two zones 4.4 km
+  apart on the ground and 359.96° apart in the coordinate land in one cell — plus the mirror
+  case, that merely being on both sides of the line is not adjacency. Both poles. A zone inside
+  one of the twelve pentagons (`gridDisk`, never the `gridRing*Unsafe` variants, which throw
+  there). Zones alone in a cell and several in one cell. Agreement with a haversine oracle that
+  shares no code with the implementation, and with an independent grid-distance definition.
+  Neighbour ordering is asserted element for element, because WP2 will merge components in the
+  order it walks these lists.
+- **A stored `h3Cell` at the wrong resolution is recomputed and counted, not trusted.** That is
+  the silent-failure guard: the registry's cell is used only when it is valid *and* at this
+  graph's resolution, and `stats().recomputedCells` makes a producer disagreement visible.
+- **ADR-001 written**, every number in it produced by `benchmarks/neighbour-graph.ts`: hexagon
+  equidistance 1.045 median / 1.207 worst against a square grid's exact 1.4142 for its
+  diagonals, res-5 area spread 1.95×, and the honest cost — adjacency brackets a distance
+  rather than equalling one (9.2 km can already be non-adjacent, 31.7 km can still be
+  adjacent). The filter-then-verify upgrade is recorded as deferred with an explicit trigger,
+  not dismissed.
+- **Next:** WP2, the correlation core — the package that carries the interview. Owner owes the
+  WP0, WP6a and WP1 understanding checkpoints.
+
+#### WP1 understanding checkpoint — questions owed
+
+Answer these without looking at the code. The first four are the WP1 questions from
+`02-PHASE-1-CORRELATION.md`; the last two came out of this session.
+
+1. Why hexagons rather than squares? Give the geometric reason and say what it does to a
+   *measured* incident extent — not "Uber uses it".
+2. What does resolution 5 mean in kilometres, and how was it chosen? What breaks if it is too
+   coarse? Too fine? (D9 is the concrete version of one of those failures.)
+3. H3 cells are not uniform in area — why not, and does it matter here? Say why the variation is
+   tolerable for the claim this system makes, and name a claim it would not be tolerable for.
+4. Two zones 500 m apart that fall on opposite sides of a cell boundary — what happens to them,
+   and where does the discontinuity actually live?
+5. Why does `neighboursOf` get slower in the constant-area series but not in the
+   constant-density one? State the cost model in one sentence.
+6. Why is the neighbour graph a shared package rather than a module copied into each service?
+   Describe the failure a copy would eventually cause, and why nothing would appear in the logs.
 
 ### 2026-09-17 — S2c: D10 diagnosed and closed
 
