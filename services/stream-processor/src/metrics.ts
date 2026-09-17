@@ -1,4 +1,4 @@
-import { Counter, Histogram, Registry } from 'prom-client';
+import { Counter, Gauge, Histogram, Registry } from 'prom-client';
 
 // Create service-specific registry
 const register = new Registry();
@@ -36,3 +36,17 @@ export const alertPublishLatencyMs = new Histogram({
 
 // Export registry
 export { register };
+
+export const zonesTrackedGauge = new Gauge({
+  name: 'zones_tracked',
+  help: 'Zones currently held in the in-memory state store',
+  labelNames: [],
+  registers: [register]
+});
+
+export const zonesEvictedTotal = new Counter({
+  name: 'zones_evicted_total',
+  help: 'Zones whose in-memory state was evicted after going idle',
+  labelNames: [],
+  registers: [register]
+});

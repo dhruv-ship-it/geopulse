@@ -5,8 +5,9 @@ import { KafkaEventConsumer } from './kafkaConsumer';
 import { RedisClient } from './redisClient';
 import { RedisWriter } from './redisWriter';
 import { KafkaAlertProducer, ZoneAlert } from './kafkaProducer';
+import { ZoneStateStore } from './zoneStateStore';
 import { logger } from './logger';
-import { sensorEventsProcessedTotal, stateTransitionsTotal, alertsPublishedTotal, alertPublishLatencyMs } from './metrics';
+import { sensorEventsProcessedTotal, stateTransitionsTotal, alertsPublishedTotal, alertPublishLatencyMs, zonesTrackedGauge, zonesEvictedTotal } from './metrics';
 
 /**
  * Main stream processor that consumes events and derives operational states
@@ -17,8 +18,7 @@ export class StreamProcessor {
   private redisClient: RedisClient;
   private redisWriter?: RedisWriter;
   private alertProducer?: KafkaAlertProducer;
-  private zoneStates: Map<string, ZoneStateData> = new Map<string, ZoneStateData>();
-  private zoneCoordinates: Map<string, { latitude: number; longitude: number }> = new Map();
+  private zones: ZoneStateStore = new ZoneStateStore();
   private eventCounter: number = 0;
   private transitionCounter: number = 0;
   private startTime: number = 0;
@@ -99,7 +99,7 @@ export class StreamProcessor {
     
     const duration = (Date.now() - this.startTime) / 1000;
     const rate = this.eventCounter / duration;
-    logger.info({ duration, totalEvents: this.eventCounter, stateTransitions: this.transitionCounter, averageRate: rate }, 'Processing summary');
+    logger.info({ duration, totalEvents: this.eventCounter, stateTransitions: this.transitionCounter, averageRate: rate, zonesTracked: this.zones.size, zonesEvicted: this.zones.evicted }, 'Processing summary');
   }
 
   /**
@@ -109,29 +109,29 @@ export class StreamProcessor {
     this.eventCounter++;
     sensorEventsProcessedTotal.inc();
     
-    // First sighting of a zone: publish it to the Redis zone registry. This is separate
-    // from the state write below because the state write only fires on a transition, and
-    // the correlation engine needs the location and H3 cells of every zone — including the
-    // ones that never leave NORMAL.
-    if (!this.zoneCoordinates.has(event.zoneId) && this.redisWriter) {
+    // Track the zone and advance the event-time watermark. The store creates state on first
+    // sight and evicts zones that have gone quiet, so the maps are bounded (D5).
+    const entry = this.zones.observe(
+      event.zoneId,
+      event.latitude,
+      event.longitude,
+      event.eventTimestamp,
+      () => this.createZoneState()
+    );
+    const zoneState = entry.state;
+
+    // Publish the zone to the Redis registry the first time we see it. Separate from the
+    // state write below because that only fires on a transition, and the correlation engine
+    // needs the location and H3 cells of every zone — including ones that never leave NORMAL.
+    if (!entry.registered && this.redisWriter) {
       try {
         await this.redisWriter.registerZone(event.zoneId, event.latitude, event.longitude);
-        this.zoneCoordinates.set(event.zoneId, {
-          latitude: event.latitude,
-          longitude: event.longitude
-        });
+        entry.registered = true;
       } catch (err) {
-        // Leave the zone unregistered so the next event retries. Processing continues:
-        // windowing does not depend on Redis.
+        // Leave it unregistered so the next event retries. Processing continues: windowing
+        // does not depend on Redis.
         logger.error({ error: err, zoneId: event.zoneId }, 'Failed to register zone');
       }
-    }
-    
-    // Get or create zone state
-    let zoneState = this.zoneStates.get(event.zoneId);
-    if (!zoneState) {
-      zoneState = this.createZoneState();
-      this.zoneStates.set(event.zoneId, zoneState);
     }
 
     // Add event to windows using event-time semantics
@@ -225,17 +225,26 @@ export class StreamProcessor {
 
     // Write to Redis when state changes
     if (stateChanged && this.redisWriter) {
-      const coordinates = this.zoneCoordinates.get(event.zoneId);
-      if (coordinates) {
-        await this.redisWriter.writeZoneState(
-          event.zoneId,
-          zoneState,
-          coordinates.latitude,
-          coordinates.longitude,
-          event.eventTimestamp
-        );
-      }
+      await this.redisWriter.writeZoneState(
+        event.zoneId,
+        zoneState,
+        entry.coordinates.latitude,
+        entry.coordinates.longitude,
+        event.eventTimestamp
+      );
     }
+
+    // Drop zones that have stopped reporting. Driven by the event-time watermark, so a
+    // replay evicts at exactly the same points as the original run.
+    const evicted = this.zones.sweep();
+    if (evicted.length > 0) {
+      zonesEvictedTotal.inc(evicted.length);
+      logger.info(
+        { evicted: evicted.length, tracked: this.zones.size, watermark: this.zones.currentWatermark },
+        'Evicted idle zone state'
+      );
+    }
+    zonesTrackedGauge.set(this.zones.size);
 
     // Log periodic updates
     if (this.eventCounter % 1000 === 0) {
@@ -270,7 +279,7 @@ export class StreamProcessor {
   private logProgress(event: SensorEvent, avg1m: number, avg5m: number): void {
     const duration = (Date.now() - this.startTime) / 1000;
     const rate = (this.eventCounter / duration).toFixed(1);
-    const currentState = this.zoneStates.get(event.zoneId)?.currentState;
+    const currentState = this.zones.get(event.zoneId)?.state.currentState;
     
     logger.info({ eventCount: this.eventCounter, rate, zoneId: event.zoneId, load: event.load, avg1m, avg5m, currentState }, 'Processing progress');
     
@@ -284,12 +293,12 @@ export class StreamProcessor {
    * Log summary of all zone states
    */
   private logZoneSummary(): void {
-    const zoneSummaries = Array.from(this.zoneStates.entries()).map(([zoneId, stateData]) => {
-      const avg1m = TimeWindowManager.calculateAverage(stateData.window1m);
-      const avg5m = TimeWindowManager.calculateAverage(stateData.window5m);
+    const zoneSummaries = Array.from(this.zones.entries()).map(([zoneId, entry]) => {
+      const avg1m = TimeWindowManager.calculateAverage(entry.state.window1m);
+      const avg5m = TimeWindowManager.calculateAverage(entry.state.window5m);
       return {
         zoneId,
-        currentState: stateData.currentState,
+        currentState: entry.state.currentState,
         avg1m: avg1m.toFixed(3),
         avg5m: avg5m.toFixed(3)
       };
