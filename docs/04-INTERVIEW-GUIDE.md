@@ -66,11 +66,33 @@ ready to be on the resume.**
 ### Tier 1 — near-certain
 
 **Q1. Why hexagons?**
-Every one of a hexagon's six neighbours is equidistant from its centre. On a square grid, the four
-diagonal neighbours are √2 times farther than the four edge neighbours, so "adjacent" would mean
-different physical distances in different directions — which would bias correlation directionally.
-Hexagons give isotropic adjacency, which is exactly the property a spatial correlation rule needs.
-(Also: H3 gives O(1) neighbour lookup by cell arithmetic, no distance computation in the hot path.)
+Isotropic adjacency. On a square grid the four diagonal neighbours are exactly √2 = 1.4142 times
+farther than the four edge neighbours, so "adjacent" means different physical distances in
+different directions and correlation would be directionally biased. A hexagon's six neighbours are
+near-equidistant.
+
+**Say "near", not "equal", and have the number.** H3 is a hexagonal grid projected onto a sphere
+through an icosahedron, so the cells are distorted and the six neighbours are not exactly
+equidistant. I measured it over 5,000 cells sampled uniformly by area: furthest-over-nearest is
+**1.045 median, 1.207 worst**, against the square grid's **exact 1.4142**. The point is not just
+that hexagons are better, it is that the square grid's anisotropy is structural and everywhere
+while the hexagon's is a bounded projection artefact.
+(Also: O(1) neighbour lookup by cell arithmetic — no distance computation in the hot path.)
+
+*Expect the follow-up, because it is the standard H3 gotcha:* there are **12 pentagons** at every
+resolution, one per icosahedron vertex, with 5 neighbours instead of 6. My tests cover a zone
+inside one. Cell area also varies — 156 to 305 km² at resolution 5, a 1.95 ratio — which is why
+the same sensor density gives different neighbourhood sizes depending on where on the globe the
+field sits. That showed up in my own benchmark as neighbour counts drifting 2.9 to 4.2 at fixed
+density, and it tracked mean cell area exactly.
+
+*And the honest limitation, if they push:* cell adjacency **brackets** a distance threshold rather
+than equalling one. Measured over 1,200 zones in a 200 km square: two zones 9.2 km apart can
+already be non-adjacent, and two 31.7 km apart can still be adjacent. Closer than the first is
+always adjacent, further than the second never is, and in between it depends where the cell
+boundary falls. If that band ever mattered I would filter by cell and then verify by true
+distance — ADR-001 records that upgrade with an explicit trigger rather than pretending the
+problem does not exist.
 
 **Q2. Why not just cluster by distance — DBSCAN, or a radius query?**
 Three reasons. First, cost: DBSCAN is O(n log n) per run and would need re-running continuously as

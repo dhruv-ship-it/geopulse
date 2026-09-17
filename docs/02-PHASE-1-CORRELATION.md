@@ -121,7 +121,9 @@ distances, awkward prime-meridian/pole behaviour; (b) k-d tree / R-tree KNN — 
 rebuilding as zones churn, and "k nearest" is the wrong semantic (we want "within a physical
 distance", which is a radius query, and radius queries on a tree are more expensive); (c) raw
 geohash-free haversine — O(n) per lookup. Record *why hexagons*: every one of the 6 neighbours of
-a hex is equidistant from the centre, whereas a square grid's diagonal neighbours are √2 farther,
+a hex is *near*-equidistant from the centre — measured at WP1 as 1.045 median, 1.207 worst, since
+H3 projects onto a sphere and the cells are distorted — whereas a square grid's diagonal
+neighbours are √2 = 1.4142 farther exactly and everywhere,
 which biases "adjacency" by direction. That property is exactly what makes H3 right for
 correlation, and it is a genuinely satisfying answer to give in an interview.
 

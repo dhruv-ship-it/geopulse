@@ -348,8 +348,9 @@ The micro-benchmark compares neighboursOf against a naive haversine scan over al
 justifies the design choice, so it matters that it is real.
 
 ADR-001 must record why H3 over geohash and over k-d tree/R-tree KNN, and specifically why
-hexagons: all six neighbours equidistant, versus a square grid where diagonals are sqrt(2)
-farther, which would make "adjacent" direction-dependent.
+hexagons: the six neighbours are near-equidistant (measured 1.045 median, 1.207 worst - H3 is
+projected onto a sphere, so do not claim exact equality), versus a square grid where diagonals
+are sqrt(2) = 1.4142 farther exactly and everywhere, which makes "adjacent" direction-dependent.
 
 Commit incrementally. Update docs/STATUS.md and the ADR table.
 ```

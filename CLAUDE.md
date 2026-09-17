@@ -37,7 +37,7 @@ under deep technical questioning. See `docs/00-VISION.md` for the full reasoning
 | `docs/04-INTERVIEW-GUIDE.md` | The story to tell + the questions that will be asked + the answers. | After each work package. |
 | `docs/05-RESUME.md` | Bullet drafts, interim + target. Rules about honesty of numbers. | When updating the resume. |
 | `docs/06-FUTURE-PHASES.md` | Phases 2–5 specified but deferred. | Phase 1 is done. |
-| `docs/07-BUILD-ROADMAP.md` | **Session-by-session execution manual** — the 13 build sessions, their prompts, and the owner's manual verification steps. | Owner planning what to run next. |
+| `docs/07-BUILD-ROADMAP.md` | **Session-by-session execution manual** — the 15 build sessions, their prompts, and the owner's manual verification steps. | Owner planning what to run next. |
 
 ## Hard rules for agents working on this repo
 
