@@ -11,6 +11,10 @@ async function main(): Promise<void> {
   try {
     await simulator.initialize();
     await simulator.start();
+    // Eval scenarios stop themselves after the planned simulated duration; open-ended runs
+    // never resolve and exit on a signal as before.
+    await simulator.waitForCompletion();
+    process.exit(0);
   } catch (error) {
     logger.fatal({ error }, 'Failed to start simulator');
     process.exit(1);

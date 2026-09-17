@@ -1,5 +1,6 @@
 import { v5 as uuidv5 } from 'uuid';
-import { SensorEvent, ZoneConfig, ScenarioType } from './types';
+import { SensorEvent, ZoneConfig, ScenarioType, AnomalySpec } from './types';
+import { combinedSeverity } from './anomaly';
 
 /**
  * Generates load values for sensors from simulated time.
@@ -47,23 +48,61 @@ export class LoadGenerator {
   static generateEvent(
     zone: ZoneConfig,
     scenario: ScenarioType,
-    simNowMs: number
+    simNowMs: number,
+    anomalies: readonly AnomalySpec[] = []
   ): SensorEvent {
     const producedAt = simNowMs;
     const eventTimestamp = simNowMs - this.sensorLagMs(zone.zoneId);
 
     const baseLoad = this.calculateLoadForScenario(zone.baseLoad, scenario, eventTimestamp);
     const realisticLoad = this.addRealisticVariation(baseLoad, zone.zoneId, eventTimestamp);
+    const finalLoad = this.applyAnomalies(realisticLoad, zone, eventTimestamp, anomalies);
 
     return {
       eventId: this.eventId(zone.zoneId, eventTimestamp),
       zoneId: zone.zoneId,
       latitude: zone.latitude,
       longitude: zone.longitude,
-      load: parseFloat(realisticLoad.toFixed(3)),
+      load: parseFloat(finalLoad.toFixed(3)),
       eventTimestamp,
       producedAt
     };
+  }
+
+  /**
+   * Fold the injected faults into the zone's load.
+   *
+   * Severity maps straight onto load — a zone under severity 0.97 reports 0.97 — because that
+   * keeps the injected quantity and the observed quantity the same thing, and so keeps the
+   * labelling threshold interpretable against the state machine's thresholds without a
+   * conversion nobody can remember. The same deterministic noise the baseline carries is
+   * applied on top, so an anomaly plateau wobbles like a real sensor rather than sitting on a
+   * suspiciously flat line.
+   *
+   * Combined with `max`, not by addition: a fault does not make a busy zone busier, it takes
+   * the zone over. Adding severity to baseline would mean a zone's degradation depended on how
+   * loaded it already was, which would smuggle a spatial pattern (baseline load) into a
+   * measurement that is supposed to isolate the injected one.
+   */
+  private static applyAnomalies(
+    baselineLoad: number,
+    zone: ZoneConfig,
+    eventTimestamp: number,
+    anomalies: readonly AnomalySpec[]
+  ): number {
+    if (anomalies.length === 0) {
+      return baselineLoad;
+    }
+
+    const severity = combinedSeverity(anomalies, zone, eventTimestamp);
+    if (severity <= 0) {
+      return baselineLoad;
+    }
+
+    const noise = this.deterministicNoise(zone.zoneId, eventTimestamp);
+    const anomalyLoad = severity * (1 + noise);
+
+    return Math.max(0, Math.min(1, Math.max(baselineLoad, anomalyLoad)));
   }
 
   /**
@@ -109,14 +148,6 @@ export class LoadGenerator {
     zoneId: string,
     timestamp: number
   ): number {
-    // Deterministic seed based on zone and time
-    const zoneSeed = parseInt(zoneId.replace('Z-', '')) * 137;
-    const timeSeed = Math.floor(timestamp / 1000);
-    const combinedSeed = (zoneSeed + timeSeed) % 10000;
-    
-    // Generate deterministic pseudo-random value
-    const randomFactor = this.pseudoRandom(combinedSeed);
-    
     // Add time-of-day variation (simulate daily patterns).
     // UTC, not local time: getHours() reads the host timezone, so the same event timestamp
     // would produce a different load on a machine in a different timezone — or on the same
@@ -126,12 +157,25 @@ export class LoadGenerator {
     const dailyPattern = this.getDailyPattern(hourOfDay);
     
     // Add some noise for realism
-    const noise = (randomFactor - 0.5) * this.NOISE_FACTOR;
+    const noise = this.deterministicNoise(zoneId, timestamp);
     
     let finalLoad = baseLoad * (1 + dailyPattern + noise);
     
     // Ensure load stays within valid range
     return Math.max(0.0, Math.min(1.0, finalLoad));
+  }
+
+  /**
+   * The sensor's own jitter: a deterministic value in +/- NOISE_FACTOR/2, a pure function of
+   * zone and event time. Shared by the baseline and by the anomaly plateau so both wobble the
+   * same way.
+   */
+  private static deterministicNoise(zoneId: string, timestamp: number): number {
+    const zoneSeed = parseInt(zoneId.replace('Z-', '')) * 137;
+    const timeSeed = Math.floor(timestamp / 1000);
+    const combinedSeed = (zoneSeed + timeSeed) % 10000;
+
+    return (this.pseudoRandom(combinedSeed) - 0.5) * this.NOISE_FACTOR;
   }
 
   /**
