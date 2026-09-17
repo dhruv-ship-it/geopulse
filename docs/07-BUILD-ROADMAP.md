@@ -525,6 +525,12 @@ Measure at 1k / 10k / 50k zones: sustained throughput, correlation latency, comp
 Also measure the baseline: per-message, single partition, no batching, on the same hardware on the
 same day. A speedup claim is only meaningful against a baseline actually measured.
 
+Check zonesEvictedTotal after every run. It must be 0. Non-zero means D11 fired (see
+01-ARCHITECTURE.md 3.5) and the run is void - at these speed multipliers the 15-minute event-time
+idle TTL is a quarter second of wall clock, so any stall trips it, and the result is a plausible
+wrong number rather than a crash. If it fires, fix D11 first: watermark per partition, global
+watermark = the MINIMUM across partitions, never the max. Then re-run.
+
 Then run the parameter sweep over CORRELATION_WINDOW_MS, H3_RESOLUTION and NEIGHBOUR_RING_SIZE
 across all four eval scenarios, and produce the tuning curve. Pick the operating point off that
 curve and record why in docs/STATUS.md.
@@ -692,6 +698,7 @@ the repair prompt in §5 instead.
 |---|---|---|
 | Topic partition counts | S1 | Every scaling claim and every throughput benchmark rests on real partitions. Pre-existing topics auto-created with 1 partition are *not* resized by `createTopics` — they must be deleted first. |
 | Integration suite green | S1 | The D1 retry/DLQ path is only covered by the gated integration test; unit coverage of the wiring is 0%. Until it runs, "alerts are never silently lost" is a claim about code that has never executed. |
+| Zero evictions during measured runs | S8, S9 | D11 is open and unobserved. It cannot crash a run; it can silently void one. `zonesEvictedTotal` must be 0 or the numbers are discarded. |
 | Degradations actually emitted | S2c | The live stack consumed 5.76M events, registered all 400 zones, and emitted zero degradations. A scored run against an empty stream reports a broken correlation engine whether or not the engine works. |
 | Pipeline actually transitions | S2a | S1's 120-second run produced **zero** state transitions with avg5m ≈ 0.9 against a 0.75 threshold. If the fixed clock does not reverse that, the correlation engine would be built against a simulator that can never express simultaneity. |
 | One incident, not hundreds | S7 | The entire thesis. If this is wrong, everything measured afterwards is measuring the wrong thing. |

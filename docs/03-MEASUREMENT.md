@@ -237,7 +237,16 @@ Non-negotiable rules, because sloppy benchmarking is worse than none:
 4. **Fix the seed.** Every run records its seed; every reported number is reproducible.
 5. **Commit raw output.** `benchmarks/results/<timestamp>-<seed>.json`, plus the environment
    (CPU, RAM, Docker version, Node version, partition count, zone count).
-6. **Measure the baseline too.** Run the naive path (per-message, single partition, no batching)
+6. **Zero evictions, or the run is void.** Check `zonesEvictedTotal` after every benchmark and
+   eval run. It must be **0**. A non-zero count means D11 fired — `ZoneStateStore` takes its
+   watermark as a global max across zones that live on independently-advancing partitions, so a
+   lagging partition's zones fall past the idle cutoff and lose their windows mid-run. Note the
+   scale trap: at `SPEED_MULTIPLIER=3600` the 15-minute *event-time* TTL is **250 ms of wall
+   clock**, so any consumer stall longer than that is enough. This does not crash anything — it
+   quietly discards window state and hands you a plausible, wrong throughput number. If it fires,
+   the run is void and D11 must be fixed (per-partition watermark, global watermark = the minimum
+   across partitions) before any number from it is used.
+7. **Measure the baseline too.** Run the naive path (per-message, single partition, no batching)
    and the optimised path on the same hardware. A speedup figure is only meaningful against a
    baseline you actually measured, on the same box, on the same day.
 

@@ -239,7 +239,7 @@ code,pre,.mono{font-family:"IBM Plex Mono",ui-monospace,Menlo,Consolas,monospace
 @media(prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
 </style>
 
-<script id="app-state" type="application/json">{"done":["S1","S2a","S2b"]}</script>
+<script id="app-state" type="application/json">{"done":["S1","S2a","S2b","S2c"]}</script>
 
 <div class="wrap">
   <header class="masthead">
@@ -633,6 +633,12 @@ Measure at 1k / 10k / 50k zones: sustained throughput, correlation latency, comp
 
 Also measure the baseline: per-message, single partition, no batching, on the same hardware on the
 same day. A speedup claim is only meaningful against a baseline actually measured.
+
+Check zonesEvictedTotal after every run. It must be 0. Non-zero means D11 fired (see
+01-ARCHITECTURE.md 3.5) and the run is void - at these speed multipliers the 15-minute event-time
+idle TTL is a quarter second of wall clock, so any stall trips it, and the result is a plausible
+wrong number rather than a crash. If it fires, fix D11 first: watermark per partition, global
+watermark = the MINIMUM across partitions, never the max. Then re-run.
 
 Then run the parameter sweep over CORRELATION_WINDOW_MS, H3_RESOLUTION and NEIGHBOUR_RING_SIZE
 across all four eval scenarios, and produce the tuning curve. Pick the operating point off that
