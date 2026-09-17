@@ -7,6 +7,7 @@ import { ZoneConfig, SensorEvent, AnomalySpec, isAnomalyScenario } from './types
 import { VirtualClock } from './virtualClock';
 import { SimulationLoop } from './simulationLoop';
 import { buildAnomalies } from './scenarios';
+import { haversineKm } from './geo';
 import { deriveRunId, writeGroundTruth } from './groundTruth';
 import { logger } from './logger';
 
@@ -150,6 +151,8 @@ export class SensorSimulator {
       'Ground truth written before the first event'
     );
 
+    this.warnIfFieldTooSparse();
+
     if (written.affectedZoneCount === 0) {
       logger.warn(
         { scenario: this.config.scenario, zoneCount: this.zones.length },
@@ -158,6 +161,61 @@ export class SensorSimulator {
       );
     }
   }
+
+  /**
+   * Warn when the zone field is too thin for correlation to mean anything.
+   *
+   * An eval run over a sparse field does not fail — it quietly produces a perfect-looking set of
+   * singleton incidents and a collapse ratio of zero, and reads as a broken correlation engine
+   * rather than as a misconfigured simulator. That is the most expensive kind of wrong number,
+   * so it is worth one O(n) check at startup. Measured spacings are in
+   * `benchmarks/results/d9-zone-spacing.txt`; the regional layout needs roughly 100 zones in the
+   * default 400 km region before every zone has a neighbour at all.
+   *
+   * Sampled rather than exhaustive: an all-pairs scan is 25 million distances at 5000 zones, and
+   * the first 64 zones against the whole field answer the question just as well. The sample is
+   * the first N by id, not a random draw, so the check stays deterministic.
+   */
+  private warnIfFieldTooSparse(): void {
+    const sample = this.zones.slice(0, Math.min(64, this.zones.length));
+    if (sample.length < 2) {
+      return;
+    }
+
+    const nearest = sample.map((zone) => {
+      let best = Infinity;
+      for (const other of this.zones) {
+        if (other.zoneId === zone.zoneId) {
+          continue;
+        }
+        const km = haversineKm(zone, other);
+        if (km < best) {
+          best = km;
+        }
+      }
+      return best;
+    });
+    nearest.sort((a, b) => a - b);
+    const medianKm = nearest[Math.floor(nearest.length / 2)];
+
+    if (medianKm > SensorSimulator.NEIGHBOUR_REACH_KM) {
+      logger.warn(
+        {
+          medianNearestNeighbourKm: Number(medianKm.toFixed(1)),
+          neighbourReachKm: SensorSimulator.NEIGHBOUR_REACH_KM,
+          zoneCount: this.zones.length,
+          zoneLayout: this.config.zoneLayout
+        },
+        'Zones are further apart than the H3 neighbour ring reaches, so no two of them are ' +
+          'adjacent. Incidents will all be singletons and the collapse ratio will be zero ' +
+          'regardless of how the correlation engine behaves. Raise NUM_ZONES or shrink ' +
+          'ZONE_REGION_EXTENT_KM before treating this run as a measurement.'
+      );
+    }
+  }
+
+  /** Reach of a one-ring H3 neighbourhood at resolution 5, give or take. */
+  private static readonly NEIGHBOUR_REACH_KM = 25;
 
   /** Relative ground-truth paths resolve against the repo root, not the service directory. */
   private resolveGroundTruthDir(): string {

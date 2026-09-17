@@ -1,0 +1,34 @@
+GeoPulse benchmark: D9 zone spacing
+generated: 2026-09-17T16:39:55Z
+commit:    90b1fa5
+node:      v20.14.0
+command:   cd services/sensor-simulator && npx ts-node -O '{"module":"commonjs","esModuleInterop":true,"target":"ES2020"}' ../../benchmarks/zone-spacing.ts
+
+D9: zone spacing by layout
+neighbour reach assumed: 25 km (H3 res 5, one ring)
+anomaly disc: 84 km radius, best-case placement
+seed: 42
+
+layout          zones   nn-min   nn-med   nn-max   pairs<=reach   zones with   zones in
+                            km       km       km                  a neighbour   84km disc
+----------------------------------------------------------------------------------------
+global-spiral     10   4752.6   6222.4   7177.6              0            0           1
+global-spiral    100   1733.4   2169.6   2207.0              0            0           1
+global-spiral    400    884.6   1072.4   1101.5              0            0           1
+global-spiral   1000    525.4    678.4    702.9              0            0           1
+global-spiral   5000    160.2    304.8    317.8              0            0           1
+
+regional-grid     10     91.6    120.8    174.7              0            0           1
+regional-grid    100     19.7     33.6     55.1             10           20          13
+regional-grid    400      8.4     15.7     25.4            671          398          54
+regional-grid   1000      4.1      9.4     16.0           4989         1000         139
+regional-grid   5000      1.8      4.1      7.3         140827         5000         689
+
+Verdict
+----------------------------------------------------------------------------------------
+global-spiral: closest pair anywhere is 160.2 km, at 5000 zones. Pairs within neighbour reach at any count: 0.
+  Largest 84 km disc holds 1 zone(s). A regional anomaly is a single-zone event, so there is no correlation to measure and no
+  grouping decision for the engine to get right or wrong.
+
+regional-grid: closest pair 1.8 km; every zone has a neighbour from 1000 zones upward.
+  Largest 84 km disc holds 689 zones at 5000 zones, which is a regional event worth collapsing.
