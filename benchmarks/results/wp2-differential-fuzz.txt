@@ -1,0 +1,39 @@
+GeoPulse WP2 - differential fuzz: TimeAwareConnectivity vs NaiveConnectivity
+generated: 2026-09-17T21:59:57Z
+commit:    5954a63
+node v20.14.0 on win32 x64
+
+Command: cd services/correlation-engine && npx jest differentialFuzz --verbose
+
+Both connectivity implementations are driven through one shared CorrelationWindow with an
+identical call sequence, and their component partitions are compared after EVERY operation.
+The seed is pinned, so this is the same 10,000 sequences on every machine. The extra
+properties in the suite add 1,000 sequences over the real H3 neighbour graph from WP1 and
+1,000 more that measure what the generator reaches, hence 11,000 in the tally below.
+
+
+differential fuzz summary
+  seed                  42
+  sequences             11,000
+  events applied        551,871
+  partition comparisons 551,871
+  component splits      7,732
+  zones expired         110,754
+  zones recovered       21,089
+  full teardowns        5,305
+  largest component     28
+  divergences           0
+PASS src/core/__tests__/differentialFuzz.test.ts (10.845 s)
+  differential fuzz — optimised connectivity against the naive oracle
+    √ agrees with NaiveConnectivity across 10,000 randomised sequences (6842 ms)
+    √ reaches the states the claim depends on (788 ms)
+  differential fuzz — over the real H3 neighbour graph
+    √ produces a field that is neither disconnected nor one blob (8 ms)
+    √ is symmetric, which is the contract both structures depend on (19 ms)
+    √ agrees with NaiveConnectivity over H3 adjacency (1270 ms)
+
+Test Suites: 1 passed, 1 total
+Tests:       5 passed, 5 total
+Snapshots:   0 total
+Time:        11.147 s, estimated 14 s
+Ran all test suites matching /src\\core\\__tests__\\differentialFuzz.test.ts/i.

@@ -18,7 +18,7 @@ echo
 # packages/ first: a service that imports @geopulse/spatial compiles against its built
 # output, so the shared package belongs in the same honest total rather than sitting outside
 # it as an untested dependency.
-for target in packages/spatial services/sensor-simulator services/stream-processor services/alert-processor services/api; do
+for target in packages/spatial services/sensor-simulator services/stream-processor services/alert-processor services/api services/correlation-engine; do
   echo "================================================================"
   echo "$target"
   echo "================================================================"
