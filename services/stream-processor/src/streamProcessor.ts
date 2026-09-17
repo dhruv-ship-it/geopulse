@@ -125,7 +125,12 @@ export class StreamProcessor {
     // needs the location and H3 cells of every zone — including ones that never leave NORMAL.
     if (!entry.registered && this.redisWriter) {
       try {
-        await this.redisWriter.registerZone(event.zoneId, event.latitude, event.longitude);
+        await this.redisWriter.registerZone(
+          event.zoneId,
+          event.latitude,
+          event.longitude,
+          event.eventTimestamp
+        );
         entry.registered = true;
       } catch (err) {
         // Leave it unregistered so the next event retries. Processing continues: windowing

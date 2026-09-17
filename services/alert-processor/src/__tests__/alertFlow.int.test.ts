@@ -1,4 +1,4 @@
-import { Kafka, Producer, Partitioners } from 'kafkajs';
+import { Kafka, Producer, Consumer, Partitioners } from 'kafkajs';
 import { createClient, RedisClientType } from 'redis';
 import { ZoneAlert } from '../types';
 import { AlertProcessor } from '../alertProcessor';
@@ -25,6 +25,7 @@ const KAFKA_BROKER = process.env.KAFKA_BROKER || 'localhost:9092';
 const REDIS_HOST = process.env.REDIS_HOST || 'localhost';
 const REDIS_PORT = process.env.REDIS_PORT || '6380';
 const ALERTS_TOPIC = 'zone.alerts';
+const DLQ_TOPIC = 'zone.degradations.dlq';
 const GLOBAL_KEY = 'alerts:global';
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -48,10 +49,15 @@ describeIntegration('alert flow (integration)', () => {
   let redis: RedisClientType;
   let postgres: PostgresClient;
   let consumer: KafkaAlertConsumer;
+  let dlqConsumer: Consumer;
+
+  /** Everything that lands on the DLQ during this run, so a test can wait for its message. */
+  const deadLetters: { value: string; headers: Record<string, string> }[] = [];
 
   // A throwaway consumer group so the run does not disturb the real service's offsets.
   const groupId = `alert-processor-it-${Date.now()}`;
-  const zoneId = `Z-IT-${Date.now()}`;
+  // zone_alerts.zone_id is varchar(10), so the id must fit in 10 characters.
+  const zoneId = `Z-${(Date.now() % 100000000).toString().padStart(8, '0')}`;
 
   beforeAll(async () => {
     redis = createClient({ url: `redis://${REDIS_HOST}:${REDIS_PORT}` }) as RedisClientType;
@@ -67,7 +73,29 @@ describeIntegration('alert flow (integration)', () => {
     });
     await producer.connect();
 
-    consumer = new KafkaAlertConsumer({ groupId, fromBeginning: false });
+    // Tail the DLQ for the whole run.
+    dlqConsumer = kafka.consumer({
+      groupId: `${groupId}-dlq`,
+      allowAutoTopicCreation: false
+    });
+    await dlqConsumer.connect();
+    await dlqConsumer.subscribe({ topic: DLQ_TOPIC, fromBeginning: false });
+    await dlqConsumer.run({
+      eachMessage: async ({ message }) => {
+        const headers: Record<string, string> = {};
+        for (const [k, v] of Object.entries(message.headers ?? {})) {
+          headers[k] = v ? v.toString() : '';
+        }
+        deadLetters.push({ value: message.value ? message.value.toString() : '', headers });
+      }
+    });
+
+    // Short retry policy so the dead-letter path does not take 15s to exercise.
+    consumer = new KafkaAlertConsumer({
+      groupId,
+      fromBeginning: false,
+      policy: { maxAttempts: 2, initialBackoffMs: 50, backoffMultiplier: 2, maxBackoffMs: 200 }
+    });
     await consumer.connect();
 
     const processor = new AlertProcessor(redis, postgres);
@@ -79,6 +107,7 @@ describeIntegration('alert flow (integration)', () => {
 
   afterAll(async () => {
     if (consumer) await consumer.disconnect();
+    if (dlqConsumer) await dlqConsumer.disconnect();
     if (producer) await producer.disconnect();
     if (postgres) await postgres.disconnect();
     if (redis) await redis.disconnect();
@@ -126,5 +155,55 @@ describeIntegration('alert flow (integration)', () => {
 
     const perZone = await redis.lRange(`alerts:zone:${zoneId}`, 0, -1);
     expect(perZone).toHaveLength(1);
+  }, 60000);
+
+  /**
+   * D1, end to end, against a real database rejection.
+   *
+   * zone_alerts.zone_id is varchar(10), so an over-long zone id makes Postgres genuinely
+   * refuse the insert — no mocking, no fault injection. Before the fix this message would
+   * have been logged once and the offset committed; it must now be recoverable from the DLQ.
+   */
+  it('routes an alert Postgres rejects to the DLQ instead of dropping it', async () => {
+    const overLongZoneId = 'Z-THIS-ID-IS-FAR-TOO-LONG';
+    const doomed: ZoneAlert = {
+      zoneId: overLongZoneId,
+      previousState: 'STRESSED',
+      currentState: 'CRITICAL',
+      avg1m: 0.97,
+      avg5m: 0.91,
+      timestamp: Date.now()
+    };
+
+    await producer.send({
+      topic: ALERTS_TOPIC,
+      messages: [{ key: doomed.zoneId, value: JSON.stringify(doomed) }]
+    });
+
+    const parked = await waitFor(
+      async () =>
+        deadLetters.find((d) => {
+          try {
+            return (JSON.parse(d.value) as ZoneAlert).zoneId === overLongZoneId;
+          } catch {
+            return false;
+          }
+        }) ?? null,
+      40000,
+      'the rejected alert to reach the dead letter queue'
+    );
+
+    // Recoverable byte for byte.
+    expect(JSON.parse(parked.value)).toEqual(doomed);
+    expect(parked.headers['x-source-topic']).toBe(ALERTS_TOPIC);
+    expect(parked.headers['x-failure-reason']).toBe('handler-failed');
+    expect(parked.headers['x-failure-attempts']).toBe('2');
+    expect(parked.headers['x-failure-error']).toMatch(/too long|value too long/i);
+
+    // And it really did not reach Postgres.
+    const result = await postgres
+      .getClient()
+      .query('SELECT 1 FROM zone_alerts WHERE zone_id = $1', [overLongZoneId.slice(0, 10)]);
+    expect(result.rows).toHaveLength(0);
   }, 60000);
 });

@@ -58,6 +58,8 @@ function fakeRedis() {
   return { client, sets, hashes, geo, calls };
 }
 
+const T0 = 1_700_000_000_000;
+
 const stateData = (): ZoneStateData => {
   const window1m = TimeWindowManager.createWindow();
   const window5m = TimeWindowManager.createWindow();
@@ -104,22 +106,27 @@ describe('RedisWriter registry', () => {
     const redis = fakeRedis();
     const writer = new RedisWriter(redis.client);
 
-    const cells = await writer.registerZone('Z-0001', 28.6139, 77.209);
+    const cells = await writer.registerZone('Z-0001', 28.6139, 77.209, T0);
 
     expect(Array.from(redis.sets.get('zones:registry')!)).toEqual(['Z-0001']);
-    expect(redis.hashes.get('zone:Z-0001')).toEqual({
+    expect(redis.hashes.get('zone:Z-0001')).toMatchObject({
       zoneId: 'Z-0001',
+      // A zone that has never transitioned is NORMAL, not stateless.
+      state: 'NORMAL',
+      avg1m: '0',
+      avg5m: '0',
       latitude: '28.6139',
       longitude: '77.209',
       h3Cell: cells.h3Cell,
-      h3CoarseCell: cells.h3CoarseCell
+      h3CoarseCell: cells.h3CoarseCell,
+      lastEventTime: String(T0)
     });
     expect(redis.geo.get('Z-0001')).toEqual({ latitude: 28.6139, longitude: 77.209 });
   });
 
   it('issues the registry, hash and geo writes as one transaction', async () => {
     const redis = fakeRedis();
-    await new RedisWriter(redis.client).registerZone('Z-0002', 10, 20);
+    await new RedisWriter(redis.client).registerZone('Z-0002', 10, 20, T0);
     expect(redis.calls).toEqual(['sAdd', 'hSet', 'geoAdd', 'exec']);
   });
 
@@ -127,8 +134,8 @@ describe('RedisWriter registry', () => {
     const redis = fakeRedis();
     const writer = new RedisWriter(redis.client);
 
-    await writer.registerZone('Z-0003', 1, 2);
-    await writer.registerZone('Z-0003', 1, 2);
+    await writer.registerZone('Z-0003', 1, 2, T0);
+    await writer.registerZone('Z-0003', 1, 2, T0);
 
     expect(redis.sets.get('zones:registry')!.size).toBe(1);
   });
@@ -137,7 +144,7 @@ describe('RedisWriter registry', () => {
     const redis = fakeRedis();
     const writer = new RedisWriter(redis.client);
 
-    await writer.registerZone('Z-0004', 35.6762, 139.6503);
+    await writer.registerZone('Z-0004', 35.6762, 139.6503, T0);
     await writer.writeZoneState('Z-0004', stateData(), 35.6762, 139.6503, 1_700_000_000_000);
 
     const hash = redis.hashes.get('zone:Z-0004')!;
@@ -151,8 +158,8 @@ describe('RedisWriter registry', () => {
     const redis = fakeRedis();
     const writer = new RedisWriter(redis.client);
 
-    await writer.registerZone('Z-0009', 1, 1);
-    await writer.registerZone('Z-0002', 2, 2);
+    await writer.registerZone('Z-0009', 1, 1, T0);
+    await writer.registerZone('Z-0002', 2, 2, T0);
 
     expect(await writer.getRegisteredZoneIds()).toEqual(['Z-0002', 'Z-0009']);
   });
