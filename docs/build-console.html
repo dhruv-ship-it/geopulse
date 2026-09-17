@@ -247,7 +247,7 @@ code,pre,.mono{font-family:"IBM Plex Mono",ui-monospace,Menlo,Consolas,monospace
     <h1>GeoPulse Build Console</h1>
     <p class="thesis">
       <em>A single sensor going critical is noise. The signal is the geometry.</em>
-      Thirteen sessions to turn a per-zone alerting pipeline into an engine that collapses
+      Fourteen sessions to turn a per-zone alerting pipeline into an engine that collapses
       alert storms into geographically-coherent incidents.
     </p>
   </header>
@@ -262,8 +262,8 @@ code,pre,.mono{font-family:"IBM Plex Mono",ui-monospace,Menlo,Consolas,monospace
 
       <div class="rail-block">
         <div class="rail-title">At a glance</div>
-        <div class="stat-row"><span class="stat-k">Sessions done</span><span class="stat-v" id="s-done">0 / 13</span></div>
-        <div class="stat-row"><span class="stat-k">Build time left</span><span class="stat-v" id="s-time">~13h</span></div>
+        <div class="stat-row"><span class="stat-k">Sessions done</span><span class="stat-v" id="s-done">0 / 14</span></div>
+        <div class="stat-row"><span class="stat-k">Build time left</span><span class="stat-v" id="s-time">~14h</span></div>
         <div class="stat-row"><span class="stat-k">At 2 / day</span><span class="stat-v" id="s-days">7 days</span></div>
         <div class="stat-row"><span class="stat-k">Resume update</span><span class="stat-v" id="s-resume">after S9</span></div>
       </div>
@@ -334,8 +334,70 @@ docker exec geopulse-kafka kafka-topics --bootstrap-server localhost:9092 \\
 cd services/alert-processor &amp;&amp; GEOPULSE_INTEGRATION=1 npm test</pre>
 <p>The integration suite is the <strong>only</strong> coverage the D1 retry/DLQ wiring has — unit coverage of it is 0%. Until it runs green, "alerts are never silently lost" describes code that has never executed.</p>`},
 
-{id:"S2",wp:"WP6a",t:"Simulator ground truth",est:"45–60m",stage:0,
+{id:"S2a",wp:"D8",t:"Virtual event clock + infra guard",est:"50–75m",stage:0,
+p:`Read docs/STATUS.md, then docs/01-ARCHITECTURE.md section 3.2 (D8), then
+benchmarks/results/d8-simulator-event-clock.txt.
+
+Fix D8. The event-time model is the design decision this session owns, so build it deliberately
+rather than patching the arithmetic.
+
+Required design — a virtual clock, decoupled from wall time:
+
+- One VirtualClock shared by every zone. It starts at a fixed epoch (SIM_START_EPOCH_MS, a
+  constant default so runs reproduce) and advances by SIM_STEP_MS per tick. Nothing in event
+  generation reads Date.now() — CLAUDE.md rule 3.
+- All zones read the SAME clock. This is the whole point: "these adjacent zones degraded within
+  the same window" has to be expressible, and today it is not.
+- Per-zone sensor lag stays, because out-of-order arrival across zones is realistic and the
+  consumer should face it — but it must be a BOUNDED offset applied to the shared clock
+  (eventTime = clock.now() - lagMs(zoneId), lag in roughly 0-20ms, derived deterministically
+  from the zone id), never an accumulator. The current bug is that the offset accumulates and
+  each zone accumulates at a different rate.
+- Add SPEED_MULTIPLIER: simulated time per real second. This matters more than it looks. The
+  state machine needs 60s of event time to confirm STRESSED, and the eval scenarios span
+  minutes; at 1x every eval run costs its full simulated duration in wall clock. At 60x a
+  60-second confirmation window elapses in one real second. Benchmarks and evals become
+  practical instead of overnight jobs.
+- producedAt should also come from the virtual clock so the whole record is deterministic. If
+  real ingest lag is worth measuring later, that is a separate field stamped by the consumer,
+  not this one.
+
+Tests: event time advances at exactly SPEED_MULTIPLIER x real rate; all zones stay within the
+lag bound of each other indefinitely (assert over a long simulated run, not 60s); the same seed
+and speed produce byte-identical output; changing only SPEED_MULTIPLIER produces the same event
+sequence with the same event timestamps.
+
+Re-run benchmarks/simulator-event-clock.ts afterwards and commit the new output next to the old
+one. The before/after is worth keeping — it is the evidence the bug was real.
+
+Then, infra hardening (small, but it must land before any measured run):
+- Another project's redis (creavo_redis) is bound to port 6380, which is GeoPulse's default. A
+  GeoPulse service started while geopulse-redis is down currently connects to it silently and
+  reads and writes another project's data.
+- Remapping the port alone is not the fix - it just relocates the collision. Set a password on
+  geopulse-redis via --requirepass, put it in the compose file and the env files, and have every
+  service authenticate. A wrong connection then fails immediately instead of silently corrupting
+  two projects at once.
+- Also move the host ports off contended ones (redis 6380 -> 6390, postgres 5432 -> 5433) and log
+  the resolved host:port at startup so the connection target is visible.
+
+Commit incrementally. Update docs/STATUS.md: close D8, unblock WP2, note the new ports.`,
+m:`<p><span class="flag">Verification gate — do not start S2b until this passes</span></p>
+<pre>docker volume rm infra_postgres_data   # 21 rows of February data
+cd infra &amp;&amp; docker-compose up -d
+cd tools/kafka-bootstrap &amp;&amp; npm run bootstrap
+
+# terminal 1
+cd services/stream-processor &amp;&amp; npm run dev
+# terminal 2
+cd services/sensor-simulator &amp;&amp; SCENARIO=spike SPEED_MULTIPLIER=60 npm run dev</pre>
+<p>You <strong>must</strong> see state transitions within a minute or two of wall clock. S1's run produced <strong>zero</strong> over 120 seconds with avg5m ≈ 0.9 against a 0.75 threshold — that is the symptom D8 caused, and reversing it is this session's whole job.</p>`},
+
+{id:"S2b",wp:"WP6a",t:"Simulator ground truth",est:"45–60m",stage:0,
 p:`Read docs/STATUS.md, then docs/03-MEASUREMENT.md, then docs/02-PHASE-1-CORRELATION.md WP6a.
+
+D8 is fixed and the virtual clock is in place; build on it rather than reintroducing wall-clock
+reads. All ground-truth timestamps are virtual event time.
 
 Implement WP6a: the anomaly injection scenarios and ground-truth emission in sensor-simulator.
 
@@ -599,7 +661,7 @@ const STAGES=[
  {n:"Ship",d:"README, ADRs, and the resume entry."}
 ];
 
-const TOTAL_MIN=[75,52,50,87,87,75,75,67,67,52,52,75,52];
+const TOTAL_MIN=[75,62,52,50,87,87,75,75,67,67,52,52,75,52];
 const PRISTINE='<!doctype html>\n'+document.documentElement.outerHTML;
 let state=JSON.parse(document.getElementById('app-state').textContent);
 let artifactApi=null, pubTimer=null;
@@ -626,10 +688,10 @@ function nextSession(){return SESSIONS.find(s=>!isDone(s.id))||null;}
 function render(){
   const nx=nextSession();
 
-  // honeycomb: rows of 5 / 4 / 4
+  // honeycomb: rows of 5 / 5 / 4
   const comb=document.getElementById('comb');
   comb.innerHTML='';
-  const rows=[SESSIONS.slice(0,5),SESSIONS.slice(5,9),SESSIONS.slice(9,13)];
+  const rows=[SESSIONS.slice(0,5),SESSIONS.slice(5,10),SESSIONS.slice(10,14)];
   rows.forEach((row,ri)=>{
     const r=document.createElement('div');
     r.className='comb-row'+(ri===1?' off':'');
@@ -651,13 +713,13 @@ function render(){
   });
 
   const n=state.done.length;
-  document.getElementById('meter').style.width=(n/13*100)+'%';
-  document.getElementById('s-done').textContent=n+' / 13';
+  document.getElementById('meter').style.width=(n/14*100)+'%';
+  document.getElementById('s-done').textContent=n+' / 14';
 
   let mins=0;
   SESSIONS.forEach((s,i)=>{if(!isDone(s.id))mins+=TOTAL_MIN[i];});
   document.getElementById('s-time').textContent='~'+Math.round(mins/60)+'h';
-  document.getElementById('s-days').textContent=Math.max(0,Math.ceil((13-n)/2))+' days';
+  document.getElementById('s-days').textContent=Math.max(0,Math.ceil((14-n)/2))+' days';
 
   const s9=isDone('S9');
   document.getElementById('s-resume').textContent=s9?'do it now':'after S9';

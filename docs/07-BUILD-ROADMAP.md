@@ -65,12 +65,16 @@ session starts blind.
 
 ## 3. The session plan
 
-13 sessions. At two sessions a day that is about a week; at one a day, under two weeks.
+14 sessions. At two sessions a day that is about a week; at one a day, under two weeks.
+
+**S2a was inserted after S1's verification run found D8** — the simulator's event clock. Everything
+from WP2 onward is measured against simulated data, so a broken clock silently invalidates all of it.
 
 | # | Work package | What gets built | Est. | Manual work after |
 |---|---|---|---|---|
 | S1 | WP0 | Defect fixes D1/D2/D4/D5, topic bootstrap, zone registry | 60–90m | Start infra, verify partitions |
-| S2 | WP6a | `regional-anomaly` scenarios + ground-truth emission | 45–60m | Run simulator, inspect JSONL |
+| S2a | D8 | Virtual event clock + redis password/port hardening | 50–75m | **Confirm transitions actually fire** |
+| S2b | WP6a | `regional-anomaly` scenarios + ground-truth emission | 45–60m | Run simulator, inspect JSONL |
 | S3 | WP1 | H3 neighbour graph + micro-benchmark + ADR-001 | 40–60m | Run bench, record numbers |
 | S4 | WP2a | CorrelationWindow, TimeAwareConnectivity, naive oracle, differential fuzz | 75–100m | Run fuzz test |
 | S5 | WP2b | IncidentLifecycle, merge/split, deterministic IDs, ADR-002/003 | 75–100m | Run property tests |
@@ -138,10 +142,85 @@ Confirm 12 partitions, and that the integration suite goes green. Both are verif
 
 ---
 
-### S2 — WP6a: simulator ground truth
+### S2a — D8: the simulator event clock, plus infra hardening
+
+> **Added after S1's verification run found D8.** WP6a cannot produce meaningful ground truth
+> until event time is fixed, and WP2 cannot be built or measured at all. This session does only
+> the clock and the infra guard — the scenarios follow in S2b.
+
+```
+Read docs/STATUS.md, then docs/01-ARCHITECTURE.md section 3.2 (D8), then
+benchmarks/results/d8-simulator-event-clock.txt.
+
+Fix D8. The event-time model is the design decision this session owns, so build it deliberately
+rather than patching the arithmetic.
+
+Required design — a virtual clock, decoupled from wall time:
+
+- One VirtualClock shared by every zone. It starts at a fixed epoch (SIM_START_EPOCH_MS, a
+  constant default so runs reproduce) and advances by SIM_STEP_MS per tick. Nothing in event
+  generation reads Date.now() — CLAUDE.md rule 3.
+- All zones read the SAME clock. This is the whole point: "these adjacent zones degraded within
+  the same window" has to be expressible, and today it is not.
+- Per-zone sensor lag stays, because out-of-order arrival across zones is realistic and the
+  consumer should face it — but it must be a BOUNDED offset applied to the shared clock
+  (eventTime = clock.now() - lagMs(zoneId), lag in roughly 0-20ms, derived deterministically
+  from the zone id), never an accumulator. The current bug is that the offset accumulates and
+  each zone accumulates at a different rate.
+- Add SPEED_MULTIPLIER: simulated time per real second. This matters more than it looks. The
+  state machine needs 60s of event time to confirm STRESSED, and the eval scenarios span
+  minutes; at 1x every eval run costs its full simulated duration in wall clock. At 60x a
+  60-second confirmation window elapses in one real second. Benchmarks and evals become
+  practical instead of overnight jobs.
+- producedAt should also come from the virtual clock so the whole record is deterministic. If
+  real ingest lag is worth measuring later, that is a separate field stamped by the consumer,
+  not this one.
+
+Tests: event time advances at exactly SPEED_MULTIPLIER x real rate; all zones stay within the
+lag bound of each other indefinitely (assert over a long simulated run, not 60s); the same seed
+and speed produce byte-identical output; changing only SPEED_MULTIPLIER produces the same event
+sequence with the same event timestamps.
+
+Re-run benchmarks/simulator-event-clock.ts afterwards and commit the new output next to the old
+one. The before/after is worth keeping — it is the evidence the bug was real.
+
+Then, infra hardening (small, but it must land before any measured run):
+- Another project's redis (creavo_redis) is bound to port 6380, which is GeoPulse's default. A
+  GeoPulse service started while geopulse-redis is down currently connects to it silently and
+  reads and writes another project's data.
+- Remapping the port alone is not the fix - it just relocates the collision. Set a password on
+  geopulse-redis via --requirepass, put it in the compose file and the env files, and have every
+  service authenticate. A wrong connection then fails immediately instead of silently corrupting
+  two projects at once.
+- Also move the host ports off contended ones (redis 6380 -> 6390, postgres 5432 -> 5433) and log
+  the resolved host:port at startup so the connection target is visible.
+
+Commit incrementally. Update docs/STATUS.md: close D8, unblock WP2, note the new ports.
+```
+
+**Manual afterwards** — this is a verification gate:
+```bash
+docker volume rm infra_postgres_data     # 21 rows of February data; drop before any measured run
+cd infra && docker-compose up -d
+cd tools/kafka-bootstrap && npm run bootstrap
+
+# run the pipeline and confirm it now actually transitions
+cd services/stream-processor && npm run dev          # terminal 1
+cd services/sensor-simulator && SCENARIO=spike SPEED_MULTIPLIER=60 npm run dev   # terminal 2
+```
+**You must see state transitions within a minute or two of wall clock.** S1's run produced zero
+over 120 seconds — that is the symptom D8 caused, and it is the thing this session has to reverse.
+If you still see none, stop and diagnose; do not proceed to S2b.
+
+---
+
+### S2b — WP6a: simulator ground truth
 
 ```
 Read docs/STATUS.md, then docs/03-MEASUREMENT.md, then docs/02-PHASE-1-CORRELATION.md WP6a.
+
+D8 is fixed and the virtual clock is in place; build on it rather than reintroducing wall-clock
+reads. All ground-truth timestamps are virtual event time.
 
 Implement WP6a: the anomaly injection scenarios and ground-truth emission in sensor-simulator.
 
@@ -533,5 +612,6 @@ the repair prompt in §5 instead.
 |---|---|---|
 | Topic partition counts | S1 | Every scaling claim and every throughput benchmark rests on real partitions. Pre-existing topics auto-created with 1 partition are *not* resized by `createTopics` — they must be deleted first. |
 | Integration suite green | S1 | The D1 retry/DLQ path is only covered by the gated integration test; unit coverage of the wiring is 0%. Until it runs, "alerts are never silently lost" is a claim about code that has never executed. |
+| Pipeline actually transitions | S2a | S1's 120-second run produced **zero** state transitions with avg5m ≈ 0.9 against a 0.75 threshold. If the fixed clock does not reverse that, the correlation engine would be built against a simulator that can never express simultaneity. |
 | One incident, not hundreds | S7 | The entire thesis. If this is wrong, everything measured afterwards is measuring the wrong thing. |
 | Eval agrees with the live API | S11 | Two implementations of the headline metric that disagree means one is wrong, and it must not be the one on the resume. |
