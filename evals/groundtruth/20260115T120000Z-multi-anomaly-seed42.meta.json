@@ -1,0 +1,14 @@
+{
+  "runId": "20260115T120000Z-multi-anomaly-seed42",
+  "scenario": "multi-anomaly",
+  "seed": 42,
+  "zoneCount": 400,
+  "startEventTime": 1768478400000,
+  "endEventTime": 1768492800000,
+  "stepMs": 1000,
+  "simulatedHours": 4,
+  "anomalyCount": 2,
+  "affectedZoneCount": 43,
+  "minAffectedSeverity": 0.85,
+  "schema": "docs/03-MEASUREMENT.md#2"
+}

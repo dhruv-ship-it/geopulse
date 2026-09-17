@@ -10,6 +10,11 @@ async function main(): Promise<void> {
   
   try {
     await simulator.initialize();
+
+    if (simulator.isPlanOnly()) {
+      process.exit(0);
+    }
+
     await simulator.start();
     // Eval scenarios stop themselves after the planned simulated duration; open-ended runs
     // never resolve and exit on a signal as before.

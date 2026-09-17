@@ -23,7 +23,8 @@ export const DEFAULT_CONFIG: SimulatorConfig = {
   regionExtentKm: ZoneGenerator.DEFAULT_REGION_EXTENT_KM,
   runDurationMs: DEFAULT_RUN_DURATION_MS,
   groundTruthDir: 'evals/groundtruth',
-  runIdOverride: null
+  runIdOverride: null,
+  planOnly: false
 };
 
 const SCENARIOS: readonly ScenarioType[] = [
@@ -82,7 +83,8 @@ export function loadConfig(): SimulatorConfig {
       10
     ),
     groundTruthDir: process.env.GROUNDTRUTH_DIR || 'evals/groundtruth',
-    runIdOverride: process.env.RUN_ID || null
+    runIdOverride: process.env.RUN_ID || null,
+    planOnly: process.env.PLAN_ONLY === '1' || process.env.PLAN_ONLY === 'true'
   };
 }
 

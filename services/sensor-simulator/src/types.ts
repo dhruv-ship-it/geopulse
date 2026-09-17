@@ -137,4 +137,6 @@ export interface SimulatorConfig {
   groundTruthDir: string;
   /** Overrides the derived run id. Leave unset for a reproducible run id. */
   runIdOverride: string | null;
+  /** Plan the run and write its labels, then exit without producing any events. */
+  planOnly: boolean;
 }

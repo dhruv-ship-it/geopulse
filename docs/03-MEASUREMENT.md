@@ -47,6 +47,46 @@ The simulator writes one JSONL record per injected anomaly to `evals/groundtruth
 
 The run id must embed the seed so any result can be reproduced exactly.
 
+**As built (WP6a).** The run id is `20260115T120000Z-regional-anomaly-seed42` — the *simulated*
+start epoch, the scenario, and the seed — not the wall-clock form illustrated above. The id is
+embedded in every record, so a wall-clock stamp would make two runs of the same configuration
+differ byte for byte, which is the exact property `CLAUDE.md` rule 3 exists to protect; `:` is
+also not a legal Windows filename character. Same configuration now means same id means same
+file, which is correct, because same configuration also means the same ground truth. `RUN_ID`
+overrides it when several runs of one configuration need keeping side by side. Reasoning in
+`docs/adr/ADR-006-ground-truth-by-construction.md`.
+
+A sidecar `<run-id>.meta.json` is written alongside, carrying the run configuration — zone
+count, simulated hours, seed, the labelling threshold. It is deliberately **not** in the JSONL,
+which stays exactly the schema above. The scorer needs it for the metrics that are rates rather
+than set comparisons: false-incident rate is per simulated hour, which is not derivable from the
+anomalies alone.
+
+### 2.0 How the labels are produced
+
+One severity function, `anomaly.severityAt(spec, zone, t)`, is called by both the event
+generator and the label deriver, on the same tick grid, at the same instants the events are
+stamped with. The labels and the stream are not two implementations of one idea — they are one
+implementation read twice, so they cannot disagree.
+
+Two thresholds, doing two different jobs:
+
+| Constant | Value | Question |
+|---|---|---|
+| `MIN_AFFECTED_SEVERITY` | 0.85 | Did this anomaly take this zone over? → membership |
+| `ONSET_SEVERITY` | ≈ 0.714 | From when was it showing? → `affectedZones[].onsetEventTime` |
+
+They were one threshold until a consistency check caught the consequence: severity climbs
+through a 120-second ramp, so a zone's load crosses the degradation threshold about twelve
+seconds before severity reaches 0.85. Measuring TTD from the later instant would have reported
+every time-to-detect twelve seconds faster than it was. `ONSET_SEVERITY` is pinned to the
+earliest instant the load *could* have crossed, given the sensor's bounded jitter, so any
+residual error is conservative rather than flattering.
+
+The deriver **throws** rather than emit a label whose peak severity falls between the two
+thresholds, because such a zone degrades on some ticks and not others and would cap the
+membership precision of every measurement taken afterwards.
+
 ### 2.1 Required scenarios
 
 The eval suite must contain all four. The last two exist to catch the two ways this system can
@@ -59,6 +99,36 @@ methodology is designed to prevent.
 | `propagating-anomaly` | A front moves across the map at known bearing/speed. | Propagation-vector accuracy; also grow/merge behaviour under continuous change. |
 | `multi-anomaly` | Two *disjoint* regional anomalies simultaneously. | **Over-grouping** — merging unrelated events into one incident. |
 | `noise` | Scattered independent single-zone degradations, no regional structure at all. | **Hallucinated incidents** — manufacturing structure out of noise. This is the one that keeps you honest. |
+
+**As built (WP6a).** All four exist in `sensor-simulator`, selected with `SCENARIO`. The
+reference configuration is `NUM_ZONES=400`, `SEED=42`, four simulated hours, which at
+`SPEED_MULTIPLIER=3600` completes in about four real minutes. What each injects at that
+configuration:
+
+| Scenario | Anomalies | Zones labelled | Notes |
+|---|---|---|---|
+| `regional-anomaly` | 1 stationary, r = 95 km | 62 | Onsets within ~20 s of each other across the disc. |
+| `propagating-anomaly` | 1 front, r = 62.5 km, 129.7° at 32.6 km/h | 57 | Onsets spread over ~195 simulated minutes as the front sweeps. |
+| `multi-anomaly` | 2 disjoint, r = 56.3 km, staggered in time | 43 (22 + 21) | ≥ 100 km of clear ground between the discs; no zone in both. |
+| `noise` | 16 single-zone bursts | 16 | ≥ 80 km apart; correct incident count is **zero**. |
+
+Reference label files for seed 42 are committed under `evals/groundtruth/`. They are fully
+regenerable — `PLAN_ONLY=1` writes them in milliseconds without producing any events.
+
+Two design points that the suite depends on and that are asserted rather than assumed:
+
+- The `multi-anomaly` builder **throws** if a parameter change ever lets its two discs approach
+  each other. A silently-overlapping pair would stop testing over-grouping while still passing.
+- Each `noise` burst's radius is derived from the distance to its zone's nearest neighbour, so a
+  burst provably cannot touch a second zone however the field is jittered. Two adjacent noise
+  zones would be a small real incident, and the scenario would stop testing what it is for.
+
+**Zone density is a precondition, not a detail.** The original zone layout spread zones over the
+whole planet, which put the closest pair 160 km apart at 5000 zones and left every H3 neighbour
+ring empty — see D9 in `01-ARCHITECTURE.md` §3.3. Any eval run over a field that sparse reports
+a collapse ratio of zero no matter how good the correlation engine is. The anomaly scenarios
+therefore default to the `regional-grid` layout, and the simulator warns at startup when the
+field it is given is still too thin.
 
 A parameter sweep over `CORRELATION_WINDOW_MS`, `H3_RESOLUTION`, and `NEIGHBOUR_RING_SIZE` should
 be run across all four to produce a tuning curve. That curve is a great interview artefact: it

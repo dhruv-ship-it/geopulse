@@ -101,11 +101,26 @@ export class SensorSimulator {
 
     this.prepareGroundTruth();
 
+    if (this.config.planOnly) {
+      // Plan-only exists because the labels are worth looking at on their own. Producing four
+      // simulated hours of events takes minutes and a running broker; deriving the labels takes
+      // milliseconds and nothing. Being able to ask "what would this seed actually inject, and
+      // how many zones would it reach" before committing to a run is the difference between
+      // tuning a scenario in seconds and tuning it in afternoons.
+      logger.info('PLAN_ONLY set — ground truth written, no events will be produced');
+      return;
+    }
+
     // Connect to Kafka
     await this.kafkaProducer.connect();
 
     this.startTime = Date.now();
     logger.info('Simulator initialized and ready');
+  }
+
+  /** True when the run was asked only to plan, so start() should do nothing. */
+  isPlanOnly(): boolean {
+    return this.config.planOnly;
   }
 
   /**

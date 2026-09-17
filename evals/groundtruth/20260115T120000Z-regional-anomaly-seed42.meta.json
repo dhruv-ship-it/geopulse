@@ -1,0 +1,14 @@
+{
+  "runId": "20260115T120000Z-regional-anomaly-seed42",
+  "scenario": "regional-anomaly",
+  "seed": 42,
+  "zoneCount": 400,
+  "startEventTime": 1768478400000,
+  "endEventTime": 1768492800000,
+  "stepMs": 1000,
+  "simulatedHours": 4,
+  "anomalyCount": 1,
+  "affectedZoneCount": 62,
+  "minAffectedSeverity": 0.85,
+  "schema": "docs/03-MEASUREMENT.md#2"
+}

@@ -99,6 +99,7 @@ before/after measurement. WP2 is no longer blocked.**
 | D6 ⬜ | **Zookeeper-mode Kafka.** `confluentinc/cp-zookeeper` + ZK-coordinated broker. Zookeeper was removed entirely in Kafka 4.0; KRaft is the current standard. | `infra/docker-compose.yml` | Not urgent, but know the answer. Cheap to migrate and a good talking point. |
 | D8 ✅ | **Simulator event clock did not track real time, and every zone's clock ran at a different rate.** Event time advanced by a per-event constant, not by elapsed time, so it ran at 0.5–10% of wall clock and zones diverged 20× from each other. | `sensor-simulator/src/loadGenerator.ts` | Blocked WP2: adjacent zones could never appear to degrade "at the same time", which is the entire premise of spatial correlation. Closed in S2a by a shared virtual clock — see §3.2 and `docs/adr/ADR-005-simulated-event-time.md`. |
 | D7 ✅ | **Simulator load depends on the host timezone.** `LoadGenerator.addRealisticVariation` read the time-of-day pattern with `Date#getHours()`, which is host-local. The same event timestamp produced a different load in a different timezone, or either side of a DST change. | `sensor-simulator/src/loadGenerator.ts` | Found while writing the WP0 determinism tests. Directly breaks the "simulator is deterministic" property that replay and every measured number rest on. Now `getUTCHours()`. |
+| D9 ✅ | **Zones were too far apart to have neighbours.** The fibonacci-spiral layout spreads zones over the whole planet: the closest pair anywhere is 160 km apart at 5000 zones, and *zero* pairs fall within an H3 res-5 one-ring neighbourhood at any zone count the project runs at. | `sensor-simulator/src/zoneGenerator.ts` | Found in S2b while building the eval scenarios. A regional anomaly would have covered exactly one zone, every connected component would have been a singleton, and the collapse ratio would have been zero — the correlation engine would have measured as broken while being correct. Closed by the `regional-grid` layout; evidence in `benchmarks/results/d9-zone-spacing.txt`, see §3.3. |
 
 ### 3.2 D8 — the simulator's event clock did not track real time (CLOSED in S2a)
 
@@ -185,6 +186,54 @@ defaults (one partition), so the `zoneId` keying bought no parallelism at all. `
 now creates them explicitly with 12 partitions and `allowAutoTopicCreation` is `false` everywhere.
 
 ---
+
+### 3.3 D9 — the zone field had no neighbours (CLOSED in S2b)
+
+Found while building the WP6a eval scenarios: a regional anomaly parameterised by a radius in
+kilometres turned out to contain one zone, whatever the radius.
+
+`ZoneGenerator` placed zones on a fibonacci spiral over the whole globe. That is a good
+distribution for a pipeline demo where geography is decorative, and a fatal one for spatial
+correlation. Measured (`benchmarks/results/d9-zone-spacing.txt`, seed 42):
+
+| Zones | Nearest-neighbour, median | Pairs within 25 km | Zones in the largest 84 km disc |
+|---|---|---|---|
+| 10 | 6222 km | 0 | 1 |
+| 100 | 2170 km | 0 | 1 |
+| 1000 | 678 km | 0 | 1 |
+| 5000 | 305 km | 0 | 1 |
+
+25 km is roughly the reach of a one-ring H3 neighbourhood at resolution 5; 84 km is the worked
+example anomaly radius in `docs/03-MEASUREMENT.md` §2.
+
+The consequence is worth stating precisely, because it is not a small inaccuracy. With no zone
+adjacent to any other, `neighboursOf` returns the empty set for every zone, every connected
+component is a singleton, every incident contains one zone, and the collapse ratio is exactly
+zero — regardless of what the correlation engine does. WP1 and WP2 would have been measured as
+total failures while being entirely correct.
+
+**Fix.** A second layout, `regional-grid`: a jittered near-square grid filling a bounded region
+(400 km around Berlin by default), stepped with great-circle displacement so the pitch is the
+stated number of kilometres at the region's latitude rather than a number of degrees. The four
+anomaly scenarios default to it; `normal` / `spike` / `drop` keep the spiral they have always had.
+
+| Zones | Nearest-neighbour, median | Pairs within 25 km | Zones in the largest 84 km disc |
+|---|---|---|---|
+| 100 | 33.6 km | 10 | 13 |
+| 400 | 15.7 km | 671 | 54 |
+| 1000 | 9.4 km | 4989 | 139 |
+| 5000 | 4.1 km | 140827 | 689 |
+
+400 zones is the reference eval configuration. Below about 100 zones the regional layout is
+still too sparse, so the simulator now warns at startup when the median nearest neighbour
+exceeds the neighbour ring's reach — that run would otherwise produce a plausible-looking zero
+rather than an error.
+
+Base loads are drawn i.i.d. from the seeded PRNG in this layout rather than from the spiral's
+`index % 7` pattern. On a grid, an index-modulo pattern lays down diagonal stripes of
+high-baseline zones — spatially correlated baseline load, which is exactly the structure the
+correlation engine is supposed to find only when an anomaly put it there.
+
 
 ## 4. Target architecture (Phase 1)
 
@@ -369,6 +418,25 @@ WP0 computes and stores the cells, WP1 consumes them.
 `EVENTS_PER_SECOND` was **removed**: it meant timer firings per real second, conflating sampling
 density with simulation speed. The real event rate is derived —
 `NUM_ZONES × (1000 / SIM_STEP_MS) × SPEED_MULTIPLIER` per real second.
+
+### 7.3 Added in S2b (WP6a ground truth)
+
+| Variable | Default | Service | Meaning |
+|---|---|---|---|
+| `SEED` | `42` | sensor-simulator | Seeds every arbitrary choice in a run: zone jitter and base loads, anomaly placement, bearing and speed, noise zone selection. Embedded in the run id. |
+| `ZONE_LAYOUT` | by scenario | sensor-simulator | `global-spiral` or `regional-grid`. Anomaly scenarios default to the latter (D9); the load-profile scenarios default to the former. |
+| `ZONE_REGION_CENTRE_LAT` | `52.31` | sensor-simulator | Centre of the `regional-grid` region. |
+| `ZONE_REGION_CENTRE_LON` | `13.04` | sensor-simulator | As above. |
+| `ZONE_REGION_EXTENT_KM` | `400` | sensor-simulator | Side of the square the regional layout fills. |
+| `RUN_DURATION_MS` | `14400000` | sensor-simulator | Simulated duration of an eval run (four simulated hours). Anomaly scenarios stop themselves at this point; load-profile scenarios ignore it and run until interrupted. |
+| `GROUNDTRUTH_DIR` | `evals/groundtruth` | sensor-simulator | Where labels are written. Relative paths resolve against the repo root. |
+| `RUN_ID` | derived | sensor-simulator | Overrides the derived run id. The derived form is `<simulated start>-<scenario>-seed<N>` — deliberately not a wall-clock stamp, see ADR-006. |
+| `PLAN_ONLY` | unset | sensor-simulator | Write the ground truth and exit without producing events. |
+
+`SCENARIO` gained four values — `regional-anomaly`, `propagating-anomaly`, `multi-anomaly`,
+`noise` — and now **rejects** an unrecognised value instead of casting it to the union type and
+quietly running `normal`. A typo used to produce an eval run with no anomalies in it, which
+reads as a detector scoring zero rather than as a misconfiguration.
 
 **Host ports changed.** Redis `6380 → 6390`, Postgres `5432 → 5434`. Both defaults were held by
 other projects on the dev machine, and 5433 (the first replacement considered for Postgres) turned
