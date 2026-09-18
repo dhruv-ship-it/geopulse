@@ -1,0 +1,258 @@
+Anomaly connectivity under the engine adjacency
+===============================================
+Detection resolution in @geopulse/spatial: res 5
+
+A regional fault is ONE thing. If its labelled zones are not one component,
+the engine cannot report it as one incident no matter how correct it is.
+
+## multi-anomaly  (400 zones, seed 42)
+
+A-001: 22 labelled zones, radius 56.3 km
+  res 4 ring 1:   1 components, largest  22/22,  11 cells occupied <== one component
+  res 4 ring 2:   1 components, largest  22/22,  11 cells occupied <== one component
+  res 4 ring 3:   1 components, largest  22/22,  11 cells occupied <== one component
+  res 5 ring 1:   4 components, largest  15/22,  22 cells occupied
+  res 5 ring 2:   1 components, largest  22/22,  22 cells occupied <== one component
+  res 5 ring 3:   1 components, largest  22/22,  22 cells occupied <== one component
+  res 6 ring 1:  22 components, largest   1/22,  22 cells occupied
+  res 6 ring 2:  20 components, largest   2/22,  22 cells occupied
+  res 6 ring 3:  10 components, largest   5/22,  22 cells occupied
+
+A-002: 21 labelled zones, radius 56.3 km
+  res 4 ring 1:   1 components, largest  21/21,   9 cells occupied <== one component
+  res 4 ring 2:   1 components, largest  21/21,   9 cells occupied <== one component
+  res 4 ring 3:   1 components, largest  21/21,   9 cells occupied <== one component
+  res 5 ring 1:   7 components, largest   7/21,  19 cells occupied
+  res 5 ring 2:   1 components, largest  21/21,  19 cells occupied <== one component
+  res 5 ring 3:   1 components, largest  21/21,  19 cells occupied <== one component
+  res 6 ring 1:  21 components, largest   1/21,  21 cells occupied
+  res 6 ring 2:  17 components, largest   2/21,  21 cells occupied
+  res 6 ring 3:  12 components, largest   6/21,  21 cells occupied
+
+  Over-grouping check — these must stay separate:
+  res 4 ring 1: 2 components across 2 anomalies
+  res 4 ring 2: 2 components across 2 anomalies
+  res 4 ring 3: 2 components across 2 anomalies
+  res 5 ring 1: 11 components across 2 anomalies
+  res 5 ring 2: 2 components across 2 anomalies
+  res 5 ring 3: 2 components across 2 anomalies
+  res 6 ring 1: 43 components across 2 anomalies
+  res 6 ring 2: 37 components across 2 anomalies
+  res 6 ring 3: 22 components across 2 anomalies
+
+## noise  (400 zones, seed 42)
+
+N-001: 1 labelled zones, radius 6 km
+  res 4 ring 1:   1 components, largest   1/1,   1 cells occupied <== one component
+  res 4 ring 2:   1 components, largest   1/1,   1 cells occupied <== one component
+  res 4 ring 3:   1 components, largest   1/1,   1 cells occupied <== one component
+  res 5 ring 1:   1 components, largest   1/1,   1 cells occupied <== one component
+  res 5 ring 2:   1 components, largest   1/1,   1 cells occupied <== one component
+  res 5 ring 3:   1 components, largest   1/1,   1 cells occupied <== one component
+  res 6 ring 1:   1 components, largest   1/1,   1 cells occupied <== one component
+  res 6 ring 2:   1 components, largest   1/1,   1 cells occupied <== one component
+  res 6 ring 3:   1 components, largest   1/1,   1 cells occupied <== one component
+
+N-002: 1 labelled zones, radius 6 km
+  res 4 ring 1:   1 components, largest   1/1,   1 cells occupied <== one component
+  res 4 ring 2:   1 components, largest   1/1,   1 cells occupied <== one component
+  res 4 ring 3:   1 components, largest   1/1,   1 cells occupied <== one component
+  res 5 ring 1:   1 components, largest   1/1,   1 cells occupied <== one component
+  res 5 ring 2:   1 components, largest   1/1,   1 cells occupied <== one component
+  res 5 ring 3:   1 components, largest   1/1,   1 cells occupied <== one component
+  res 6 ring 1:   1 components, largest   1/1,   1 cells occupied <== one component
+  res 6 ring 2:   1 components, largest   1/1,   1 cells occupied <== one component
+  res 6 ring 3:   1 components, largest   1/1,   1 cells occupied <== one component
+
+N-003: 1 labelled zones, radius 6 km
+  res 4 ring 1:   1 components, largest   1/1,   1 cells occupied <== one component
+  res 4 ring 2:   1 components, largest   1/1,   1 cells occupied <== one component
+  res 4 ring 3:   1 components, largest   1/1,   1 cells occupied <== one component
+  res 5 ring 1:   1 components, largest   1/1,   1 cells occupied <== one component
+  res 5 ring 2:   1 components, largest   1/1,   1 cells occupied <== one component
+  res 5 ring 3:   1 components, largest   1/1,   1 cells occupied <== one component
+  res 6 ring 1:   1 components, largest   1/1,   1 cells occupied <== one component
+  res 6 ring 2:   1 components, largest   1/1,   1 cells occupied <== one component
+  res 6 ring 3:   1 components, largest   1/1,   1 cells occupied <== one component
+
+N-004: 1 labelled zones, radius 6 km
+  res 4 ring 1:   1 components, largest   1/1,   1 cells occupied <== one component
+  res 4 ring 2:   1 components, largest   1/1,   1 cells occupied <== one component
+  res 4 ring 3:   1 components, largest   1/1,   1 cells occupied <== one component
+  res 5 ring 1:   1 components, largest   1/1,   1 cells occupied <== one component
+  res 5 ring 2:   1 components, largest   1/1,   1 cells occupied <== one component
+  res 5 ring 3:   1 components, largest   1/1,   1 cells occupied <== one component
+  res 6 ring 1:   1 components, largest   1/1,   1 cells occupied <== one component
+  res 6 ring 2:   1 components, largest   1/1,   1 cells occupied <== one component
+  res 6 ring 3:   1 components, largest   1/1,   1 cells occupied <== one component
+
+N-005: 1 labelled zones, radius 6 km
+  res 4 ring 1:   1 components, largest   1/1,   1 cells occupied <== one component
+  res 4 ring 2:   1 components, largest   1/1,   1 cells occupied <== one component
+  res 4 ring 3:   1 components, largest   1/1,   1 cells occupied <== one component
+  res 5 ring 1:   1 components, largest   1/1,   1 cells occupied <== one component
+  res 5 ring 2:   1 components, largest   1/1,   1 cells occupied <== one component
+  res 5 ring 3:   1 components, largest   1/1,   1 cells occupied <== one component
+  res 6 ring 1:   1 components, largest   1/1,   1 cells occupied <== one component
+  res 6 ring 2:   1 components, largest   1/1,   1 cells occupied <== one component
+  res 6 ring 3:   1 components, largest   1/1,   1 cells occupied <== one component
+
+N-006: 1 labelled zones, radius 5.39 km
+  res 4 ring 1:   1 components, largest   1/1,   1 cells occupied <== one component
+  res 4 ring 2:   1 components, largest   1/1,   1 cells occupied <== one component
+  res 4 ring 3:   1 components, largest   1/1,   1 cells occupied <== one component
+  res 5 ring 1:   1 components, largest   1/1,   1 cells occupied <== one component
+  res 5 ring 2:   1 components, largest   1/1,   1 cells occupied <== one component
+  res 5 ring 3:   1 components, largest   1/1,   1 cells occupied <== one component
+  res 6 ring 1:   1 components, largest   1/1,   1 cells occupied <== one component
+  res 6 ring 2:   1 components, largest   1/1,   1 cells occupied <== one component
+  res 6 ring 3:   1 components, largest   1/1,   1 cells occupied <== one component
+
+N-007: 1 labelled zones, radius 6 km
+  res 4 ring 1:   1 components, largest   1/1,   1 cells occupied <== one component
+  res 4 ring 2:   1 components, largest   1/1,   1 cells occupied <== one component
+  res 4 ring 3:   1 components, largest   1/1,   1 cells occupied <== one component
+  res 5 ring 1:   1 components, largest   1/1,   1 cells occupied <== one component
+  res 5 ring 2:   1 components, largest   1/1,   1 cells occupied <== one component
+  res 5 ring 3:   1 components, largest   1/1,   1 cells occupied <== one component
+  res 6 ring 1:   1 components, largest   1/1,   1 cells occupied <== one component
+  res 6 ring 2:   1 components, largest   1/1,   1 cells occupied <== one component
+  res 6 ring 3:   1 components, largest   1/1,   1 cells occupied <== one component
+
+N-008: 1 labelled zones, radius 6 km
+  res 4 ring 1:   1 components, largest   1/1,   1 cells occupied <== one component
+  res 4 ring 2:   1 components, largest   1/1,   1 cells occupied <== one component
+  res 4 ring 3:   1 components, largest   1/1,   1 cells occupied <== one component
+  res 5 ring 1:   1 components, largest   1/1,   1 cells occupied <== one component
+  res 5 ring 2:   1 components, largest   1/1,   1 cells occupied <== one component
+  res 5 ring 3:   1 components, largest   1/1,   1 cells occupied <== one component
+  res 6 ring 1:   1 components, largest   1/1,   1 cells occupied <== one component
+  res 6 ring 2:   1 components, largest   1/1,   1 cells occupied <== one component
+  res 6 ring 3:   1 components, largest   1/1,   1 cells occupied <== one component
+
+N-009: 1 labelled zones, radius 5.16 km
+  res 4 ring 1:   1 components, largest   1/1,   1 cells occupied <== one component
+  res 4 ring 2:   1 components, largest   1/1,   1 cells occupied <== one component
+  res 4 ring 3:   1 components, largest   1/1,   1 cells occupied <== one component
+  res 5 ring 1:   1 components, largest   1/1,   1 cells occupied <== one component
+  res 5 ring 2:   1 components, largest   1/1,   1 cells occupied <== one component
+  res 5 ring 3:   1 components, largest   1/1,   1 cells occupied <== one component
+  res 6 ring 1:   1 components, largest   1/1,   1 cells occupied <== one component
+  res 6 ring 2:   1 components, largest   1/1,   1 cells occupied <== one component
+  res 6 ring 3:   1 components, largest   1/1,   1 cells occupied <== one component
+
+N-010: 1 labelled zones, radius 6 km
+  res 4 ring 1:   1 components, largest   1/1,   1 cells occupied <== one component
+  res 4 ring 2:   1 components, largest   1/1,   1 cells occupied <== one component
+  res 4 ring 3:   1 components, largest   1/1,   1 cells occupied <== one component
+  res 5 ring 1:   1 components, largest   1/1,   1 cells occupied <== one component
+  res 5 ring 2:   1 components, largest   1/1,   1 cells occupied <== one component
+  res 5 ring 3:   1 components, largest   1/1,   1 cells occupied <== one component
+  res 6 ring 1:   1 components, largest   1/1,   1 cells occupied <== one component
+  res 6 ring 2:   1 components, largest   1/1,   1 cells occupied <== one component
+  res 6 ring 3:   1 components, largest   1/1,   1 cells occupied <== one component
+
+N-011: 1 labelled zones, radius 4.9 km
+  res 4 ring 1:   1 components, largest   1/1,   1 cells occupied <== one component
+  res 4 ring 2:   1 components, largest   1/1,   1 cells occupied <== one component
+  res 4 ring 3:   1 components, largest   1/1,   1 cells occupied <== one component
+  res 5 ring 1:   1 components, largest   1/1,   1 cells occupied <== one component
+  res 5 ring 2:   1 components, largest   1/1,   1 cells occupied <== one component
+  res 5 ring 3:   1 components, largest   1/1,   1 cells occupied <== one component
+  res 6 ring 1:   1 components, largest   1/1,   1 cells occupied <== one component
+  res 6 ring 2:   1 components, largest   1/1,   1 cells occupied <== one component
+  res 6 ring 3:   1 components, largest   1/1,   1 cells occupied <== one component
+
+N-012: 1 labelled zones, radius 6 km
+  res 4 ring 1:   1 components, largest   1/1,   1 cells occupied <== one component
+  res 4 ring 2:   1 components, largest   1/1,   1 cells occupied <== one component
+  res 4 ring 3:   1 components, largest   1/1,   1 cells occupied <== one component
+  res 5 ring 1:   1 components, largest   1/1,   1 cells occupied <== one component
+  res 5 ring 2:   1 components, largest   1/1,   1 cells occupied <== one component
+  res 5 ring 3:   1 components, largest   1/1,   1 cells occupied <== one component
+  res 6 ring 1:   1 components, largest   1/1,   1 cells occupied <== one component
+  res 6 ring 2:   1 components, largest   1/1,   1 cells occupied <== one component
+  res 6 ring 3:   1 components, largest   1/1,   1 cells occupied <== one component
+
+N-013: 1 labelled zones, radius 4.45 km
+  res 4 ring 1:   1 components, largest   1/1,   1 cells occupied <== one component
+  res 4 ring 2:   1 components, largest   1/1,   1 cells occupied <== one component
+  res 4 ring 3:   1 components, largest   1/1,   1 cells occupied <== one component
+  res 5 ring 1:   1 components, largest   1/1,   1 cells occupied <== one component
+  res 5 ring 2:   1 components, largest   1/1,   1 cells occupied <== one component
+  res 5 ring 3:   1 components, largest   1/1,   1 cells occupied <== one component
+  res 6 ring 1:   1 components, largest   1/1,   1 cells occupied <== one component
+  res 6 ring 2:   1 components, largest   1/1,   1 cells occupied <== one component
+  res 6 ring 3:   1 components, largest   1/1,   1 cells occupied <== one component
+
+N-014: 1 labelled zones, radius 6 km
+  res 4 ring 1:   1 components, largest   1/1,   1 cells occupied <== one component
+  res 4 ring 2:   1 components, largest   1/1,   1 cells occupied <== one component
+  res 4 ring 3:   1 components, largest   1/1,   1 cells occupied <== one component
+  res 5 ring 1:   1 components, largest   1/1,   1 cells occupied <== one component
+  res 5 ring 2:   1 components, largest   1/1,   1 cells occupied <== one component
+  res 5 ring 3:   1 components, largest   1/1,   1 cells occupied <== one component
+  res 6 ring 1:   1 components, largest   1/1,   1 cells occupied <== one component
+  res 6 ring 2:   1 components, largest   1/1,   1 cells occupied <== one component
+  res 6 ring 3:   1 components, largest   1/1,   1 cells occupied <== one component
+
+N-015: 1 labelled zones, radius 6 km
+  res 4 ring 1:   1 components, largest   1/1,   1 cells occupied <== one component
+  res 4 ring 2:   1 components, largest   1/1,   1 cells occupied <== one component
+  res 4 ring 3:   1 components, largest   1/1,   1 cells occupied <== one component
+  res 5 ring 1:   1 components, largest   1/1,   1 cells occupied <== one component
+  res 5 ring 2:   1 components, largest   1/1,   1 cells occupied <== one component
+  res 5 ring 3:   1 components, largest   1/1,   1 cells occupied <== one component
+  res 6 ring 1:   1 components, largest   1/1,   1 cells occupied <== one component
+  res 6 ring 2:   1 components, largest   1/1,   1 cells occupied <== one component
+  res 6 ring 3:   1 components, largest   1/1,   1 cells occupied <== one component
+
+N-016: 1 labelled zones, radius 4.72 km
+  res 4 ring 1:   1 components, largest   1/1,   1 cells occupied <== one component
+  res 4 ring 2:   1 components, largest   1/1,   1 cells occupied <== one component
+  res 4 ring 3:   1 components, largest   1/1,   1 cells occupied <== one component
+  res 5 ring 1:   1 components, largest   1/1,   1 cells occupied <== one component
+  res 5 ring 2:   1 components, largest   1/1,   1 cells occupied <== one component
+  res 5 ring 3:   1 components, largest   1/1,   1 cells occupied <== one component
+  res 6 ring 1:   1 components, largest   1/1,   1 cells occupied <== one component
+  res 6 ring 2:   1 components, largest   1/1,   1 cells occupied <== one component
+  res 6 ring 3:   1 components, largest   1/1,   1 cells occupied <== one component
+
+  Over-grouping check — these must stay separate:
+  res 4 ring 1: 16 components across 16 anomalies
+  res 4 ring 2: 7 components across 16 anomalies  <== MERGED, over-grouping
+  res 4 ring 3: 2 components across 16 anomalies  <== MERGED, over-grouping
+  res 5 ring 1: 16 components across 16 anomalies
+  res 5 ring 2: 16 components across 16 anomalies
+  res 5 ring 3: 16 components across 16 anomalies
+  res 6 ring 1: 16 components across 16 anomalies
+  res 6 ring 2: 16 components across 16 anomalies
+  res 6 ring 3: 16 components across 16 anomalies
+
+## propagating-anomaly  (400 zones, seed 42)
+
+A-001: 57 labelled zones, radius 62.5 km
+  res 4 ring 1:   1 components, largest  57/57,  23 cells occupied <== one component
+  res 4 ring 2:   1 components, largest  57/57,  23 cells occupied <== one component
+  res 4 ring 3:   1 components, largest  57/57,  23 cells occupied <== one component
+  res 5 ring 1:  10 components, largest  20/57,  56 cells occupied
+  res 5 ring 2:   1 components, largest  57/57,  56 cells occupied <== one component
+  res 5 ring 3:   1 components, largest  57/57,  56 cells occupied <== one component
+  res 6 ring 1:  57 components, largest   1/57,  57 cells occupied
+  res 6 ring 2:  45 components, largest   3/57,  57 cells occupied
+  res 6 ring 3:  22 components, largest   8/57,  57 cells occupied
+
+## regional-anomaly  (400 zones, seed 42)
+
+A-001: 62 labelled zones, radius 95 km
+  res 4 ring 1:   1 components, largest  62/62,  20 cells occupied <== one component
+  res 4 ring 2:   1 components, largest  62/62,  20 cells occupied <== one component
+  res 4 ring 3:   1 components, largest  62/62,  20 cells occupied <== one component
+  res 5 ring 1:   7 components, largest  35/62,  61 cells occupied
+  res 5 ring 2:   1 components, largest  62/62,  61 cells occupied <== one component
+  res 5 ring 3:   1 components, largest  62/62,  61 cells occupied <== one component
+  res 6 ring 1:  62 components, largest   1/62,  62 cells occupied
+  res 6 ring 2:  52 components, largest   3/62,  62 cells occupied
+  res 6 ring 3:  23 components, largest  10/62,  62 cells occupied
+
+cellsFor(51.96, 13.09) -> fine 851f180ffffffff (res 5), coarse 831f18fffffffff
