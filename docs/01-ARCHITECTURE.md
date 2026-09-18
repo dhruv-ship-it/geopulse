@@ -500,8 +500,9 @@ problem does not exist.
 | `CORRELATION_WINDOW_MS` | `120000` | How long a degraded zone stays an active member. |
 | `INCIDENT_MIN_ZONES` | `3` | Members required before a component is promoted to an incident. |
 | `INCIDENT_CLOSE_GRACE_MS` | `60000` | Grace period below `MIN_ZONES` before closing. |
-| `NEIGHBOUR_RING_SIZE` | `1` | `gridDisk` k. Raising it makes correlation more aggressive. |
+| `NEIGHBOUR_RING_SIZE` | `2` | `gridDisk` k. Was 1 until WP3: at one zone per cell, ring 1 fragmented a single 95 km fault into 7 components (D12). See ADR-001's amendment. |
 | `COMPACTION_INTERVAL_MS` | `5000` | Expiry/compaction tick for the connectivity structure. |
+| `RECONCILE_TICK_MS` | `COMPACTION_INTERVAL_MS` | Event-time grid the incident lifecycle reconciles on. Every `openedAt` is a multiple of it, and `openedAt` is in the incident id preimage, so changing it renames every incident. See ADR-004's amendment. |
 
 ### 7.1 Added in WP0
 

@@ -164,8 +164,30 @@ describeIntegration('alert flow (integration)', () => {
     );
     expect(cached.avg5m).toBe(0.78);
 
+    // Content, not count.
+    //
+    // This asserted exactly one entry until the whole stack came up with one command. It is now
+    // routinely two, and that is correct: `docker compose up` runs a real `alert-processor` on
+    // `zone.degradations`, and this test joins with a throwaway consumer group so as not to move
+    // the real service's offsets. Two independent groups both persisting the same topic is two
+    // writes, and the per-zone Redis list is an `LPUSH` history rather than a keyed upsert, so it
+    // does not collapse them.
+    //
+    // Asserting a count here would be asserting that nothing else is reading the topic, which is
+    // not a property of this system and not one worth having. What must be true is that every
+    // entry for this zone is the degradation that was produced.
     const perZone = await redis.lRange(`alerts:zone:${zoneId}`, 0, -1);
-    expect(perZone).toHaveLength(1);
+    expect(perZone.length).toBeGreaterThanOrEqual(1);
+    for (const entry of perZone) {
+      expect(JSON.parse(entry)).toEqual({
+        previousState: degradation.previousState,
+        currentState: degradation.currentState,
+        severity: degradation.severity,
+        avg1m: degradation.avg1m,
+        avg5m: degradation.avg5m,
+        eventTime: degradation.eventTime
+      });
+    }
   }, 60000);
 
   /**
