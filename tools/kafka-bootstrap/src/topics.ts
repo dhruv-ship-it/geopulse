@@ -1,6 +1,12 @@
 /**
  * Single source of truth for GeoPulse Kafka topics.
  *
+ * `zone.alerts` was removed in WP3. Nothing produces or consumes it any more — the per-zone
+ * stage emits `zone.degradations`, and the rename is the conceptual core of Phase 1
+ * (`01-ARCHITECTURE.md` §4.1), not a cosmetic one. Dropping it from the spec means this tool
+ * stops managing it; a broker that already has the topic keeps it until someone deletes it by
+ * hand, which is the right default for a tool that is otherwise purely additive.
+ *
  * Topics used to be auto-created by the producers, which meant they were created with
  * broker defaults — one partition. Messages are keyed by zoneId (and, from WP3 onwards,
  * by coarse H3 cell), so a single partition throws away the only parallelism the keying
@@ -57,15 +63,6 @@ export function topicSpecs(
         'one partition; beyond that the work is embarrassingly parallel.'
     },
     {
-      topic: 'zone.alerts',
-      numPartitions: partitions,
-      replicationFactor,
-      configEntries: [LOG_APPEND_TIME],
-      rationale:
-        'Pre-rename name of zone.degradations, still produced/consumed until WP3 lands the ' +
-        'rename. Created here so the current pipeline keeps working with auto-creation off.'
-    },
-    {
       topic: 'zone.degradations',
       numPartitions: partitions,
       replicationFactor,
@@ -82,8 +79,10 @@ export function topicSpecs(
       replicationFactor,
       configEntries: [{ name: 'retention.ms', value: FOURTEEN_DAYS_MS }, LOG_APPEND_TIME],
       rationale:
-        'Dead letters from alert-processor. One partition for ordered inspection; 14-day ' +
-        'retention so a failure is not silently aged out before anyone looks at it.'
+        'Dead letters for zone.degradations, from both sides of it: alert-processor when a ' +
+        'degradation cannot be persisted, and stream-processor when one cannot be published ' +
+        'at all. One partition for ordered inspection; 14-day retention so a failure is not ' +
+        'silently aged out before anyone looks at it.'
     },
     {
       topic: 'zone.incidents',

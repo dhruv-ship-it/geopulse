@@ -51,3 +51,59 @@ export const postgresAlertWriteLatencyMs = new Histogram({
 
 // Export registry
 export { register };
+
+// ------------------------------------------------------------------- incidents
+//
+// The second consumer's metrics. Kept in this registry rather than a separate one because the
+// two consumers are one process with one /metrics endpoint, and separating them would mean a
+// scrape that could show one half of the service's health.
+
+export const incidentsConsumedTotal = new Counter({
+  name: 'incidents_consumed_total',
+  help: 'Incident lifecycle events consumed from zone.incidents',
+  labelNames: [],
+  registers: [register]
+});
+
+export const incidentEventsPersistedTotal = new Counter({
+  name: 'incident_events_persisted_total',
+  help: 'Incident events written to Postgres, by lifecycle event type',
+  labelNames: ['event_type'],
+  registers: [register]
+});
+
+/**
+ * Membership rows written, split by direction.
+ *
+ * Joins without departures is the signature of the recovery path being broken — the same thing
+ * `degradations_published_total{direction}` catches one service upstream, visible here as
+ * incidents that only ever grow.
+ */
+export const incidentMemberRowsWrittenTotal = new Counter({
+  name: 'incident_member_rows_written_total',
+  help: 'incident_members rows written, by direction',
+  labelNames: ['direction'],
+  registers: [register]
+});
+
+export const incidentsDeadLetteredTotal = new Counter({
+  name: 'incidents_dead_lettered_total',
+  help: 'Incident events routed to the dead letter queue after recovery was exhausted',
+  labelNames: ['reason'],
+  registers: [register]
+});
+
+export const incidentRetriesTotal = new Counter({
+  name: 'incident_retries_total',
+  help: 'Retry attempts made after a failed incident persistence',
+  labelNames: [],
+  registers: [register]
+});
+
+export const postgresIncidentWriteLatencyMs = new Histogram({
+  name: 'postgres_incident_write_latency_ms',
+  help: 'Time taken to persist one incident event to PostgreSQL in milliseconds',
+  labelNames: [],
+  buckets: [1, 5, 10, 25, 50, 100, 250, 500, 1000],
+  registers: [register]
+});
