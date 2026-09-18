@@ -8,6 +8,7 @@ import { KafkaIncidentConsumer } from './incidentConsumer';
 import { IncidentRepository } from './incidentRepository';
 import { RedisClient } from './redisClient';
 import { PostgresClient } from './postgresClient';
+import { runMigrations } from './migrate';
 import { AlertProcessor } from './alertProcessor';
 import { register, alertsConsumedTotal } from './metrics';
 
@@ -62,6 +63,10 @@ async function main(): Promise<void> {
     await incidentConsumer.connect();
     await redisClient.connect();
     await postgresClient.connect();
+    // Before either consumer starts. The files are idempotent DDL applied in name order; see
+    // migrate.ts for why this is not left to Postgres's initdb hook.
+    const applied = await runMigrations(postgresClient.getClient());
+    logger.info({ migrations: applied }, 'Schema ready');
 
     const alertProcessor = new AlertProcessor(redisClient.getClient(), postgresClient);
     const incidentRepository = new IncidentRepository(postgresClient.getClient());

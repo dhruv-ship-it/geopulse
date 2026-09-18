@@ -1,4 +1,23 @@
-version: "3.8"
+# GeoPulse — the whole stack, one command.
+#
+#   cd infra && docker compose up -d --build
+#
+# Brings up infrastructure, creates the topics, starts the four pipeline services and the API,
+# and runs the simulator against SCENARIO (default `regional-anomaly`). That last part is the
+# point: the thesis of this project is that one regional fault should produce one incident and
+# not sixty alerts, and the default `up` is what demonstrates it.
+#
+# To run a different scenario without editing this file:
+#   SCENARIO=multi-anomaly NUM_ZONES=800 docker compose up -d --build
+#
+# To bring up the pipeline without generating load (the eval harness drives the simulator
+# itself):
+#   docker compose up -d --build --scale simulator=0
+#
+# Build contexts are `..`, the repo root, because every service resolves the shared packages
+# through `file:../../packages/...` and a context rooted at the service cannot see them.
+
+name: geopulse
 
 services:
   zookeeper:
@@ -9,20 +28,50 @@ services:
       ZOOKEEPER_TICK_TIME: 2000
     ports:
       - "2181:2181"
+    healthcheck:
+      # `srvr`, not the more obvious `ruok`. This image enables only `srvr` in its four-letter-
+      # word whitelist and answers anything else with "not in the whitelist" — on stdout, exit 0
+      # — so a `ruok` probe fails against a perfectly healthy ZooKeeper and takes the whole stack
+      # down with it. The `ZOOKEEPER_4LW_COMMANDS_WHITELIST` env var does not reach the property
+      # either, because the image's property-name conversion does not survive a leading digit.
+      # `srvr` prints the server's mode, which is a stronger statement than "I am alive" anyway.
+      test: ["CMD-SHELL", "echo srvr | nc -w 2 localhost 2181 | grep -q Mode"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
 
   kafka:
     image: confluentinc/cp-kafka:7.6.0
     container_name: geopulse-kafka
     depends_on:
-      - zookeeper
+      zookeeper:
+        condition: service_healthy
     ports:
       - "9092:9092"
     environment:
       KAFKA_BROKER_ID: 1
       KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
-      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092
-      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://localhost:9092
+      # Two listeners, and this is not boilerplate. A single advertised listener of
+      # `localhost:9092` works for a client on the host and is unreachable from another
+      # container, where `localhost` is that container. INTERNAL is what the services use;
+      # EXTERNAL is what `npm run dev` on the host uses. Both point at this same broker.
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: INTERNAL:PLAINTEXT,EXTERNAL:PLAINTEXT
+      KAFKA_LISTENERS: INTERNAL://0.0.0.0:29092,EXTERNAL://0.0.0.0:9092
+      KAFKA_ADVERTISED_LISTENERS: INTERNAL://kafka:29092,EXTERNAL://localhost:9092
+      KAFKA_INTER_BROKER_LISTENER_NAME: INTERNAL
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      # Off at the broker as well as in every client. A topic conjured with one partition is the
+      # misconfiguration tools/kafka-bootstrap exists to prevent, and defence in one place only
+      # is not defence.
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
+    healthcheck:
+      test: ["CMD", "kafka-broker-api-versions", "--bootstrap-server", "localhost:29092"]
+      interval: 10s
+      timeout: 10s
+      retries: 20
+      start_period: 20s
 
   redis:
     image: redis:7.2-alpine
@@ -34,6 +83,11 @@ services:
       # AUTH instead of silently reading and writing another project's data.
       - "6390:6379"
     command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD:-geopulse-dev}
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD:-geopulse-dev}", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
 
   postgres:
     image: postgres:16-alpine
@@ -49,7 +103,158 @@ services:
       POSTGRES_DB: geopulse
     volumes:
       - postgres_data:/var/lib/postgresql/data
-      - ../services/alert-processor/migrations:/docker-entrypoint-initdb.d
+      # The initdb hook is deliberately gone. It runs only when the data directory is empty, so
+      # a migration added later silently did not apply to anyone who already had a volume — the
+      # stack came up healthy and the first incident write failed on a missing relation. The
+      # schema is now applied at startup by the service that owns it (alert-processor/migrate.ts).
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U geopulse -d geopulse"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  # One-shot. Creates the topics with their partition counts and configs, prints what the broker
+  # actually has, and exits. Every service waits for it to succeed, because every client has
+  # auto-creation off and would otherwise fail to subscribe — deliberately.
+  kafka-bootstrap:
+    build:
+      context: ..
+      dockerfile: tools/kafka-bootstrap/Dockerfile
+    container_name: geopulse-kafka-bootstrap
+    depends_on:
+      kafka:
+        condition: service_healthy
+    environment:
+      KAFKA_BROKER: kafka:29092
+      KAFKA_TOPIC_PARTITIONS: ${KAFKA_TOPIC_PARTITIONS:-12}
+    restart: "no"
+
+  stream-processor:
+    build:
+      context: ..
+      dockerfile: services/stream-processor/Dockerfile
+    container_name: geopulse-stream-processor
+    depends_on:
+      kafka-bootstrap:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+    environment:
+      KAFKA_BROKER: kafka:29092
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-geopulse-dev}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+    restart: unless-stopped
+
+  correlation-engine:
+    build:
+      context: ..
+      dockerfile: services/correlation-engine/Dockerfile
+    container_name: geopulse-correlation-engine
+    depends_on:
+      kafka-bootstrap:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+    ports:
+      - "9093:9093"
+    environment:
+      KAFKA_BROKER: kafka:29092
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-geopulse-dev}
+      METRICS_PORT: "9093"
+      # The correlation geometry. These four decide whether the project's central claim is true
+      # or false, so they are set explicitly here rather than left to defaults a benchmark would
+      # have to guess at. `/health` prints them back.
+      CORRELATION_WINDOW_MS: ${CORRELATION_WINDOW_MS:-120000}
+      COMPACTION_INTERVAL_MS: ${COMPACTION_INTERVAL_MS:-5000}
+      INCIDENT_MIN_ZONES: ${INCIDENT_MIN_ZONES:-3}
+      INCIDENT_CLOSE_GRACE_MS: ${INCIDENT_CLOSE_GRACE_MS:-60000}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+    restart: unless-stopped
+
+  # Persists both durable topics: zone.degradations and zone.incidents, two consumer groups in
+  # one process. It also owns migrations/ and applies them at startup.
+  alert-processor:
+    build:
+      context: ..
+      dockerfile: services/alert-processor/Dockerfile
+    container_name: geopulse-alert-processor
+    depends_on:
+      kafka-bootstrap:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    ports:
+      - "9091:9091"
+    environment:
+      KAFKA_BROKER: kafka:29092
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-geopulse-dev}
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: "5432"
+      POSTGRES_DB: geopulse
+      POSTGRES_USER: geopulse
+      POSTGRES_PASSWORD: geopulse
+      METRICS_PORT: "9091"
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+    restart: unless-stopped
+
+  api:
+    build:
+      context: ..
+      dockerfile: services/api/Dockerfile
+    container_name: geopulse-api
+    depends_on:
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    ports:
+      - "3000:3000"
+    environment:
+      PORT: "3000"
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-geopulse-dev}
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: "5432"
+      POSTGRES_DB: geopulse
+      POSTGRES_USER: geopulse
+      POSTGRES_PASSWORD: geopulse
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+    restart: unless-stopped
+
+  simulator:
+    build:
+      context: ..
+      dockerfile: services/sensor-simulator/Dockerfile
+    container_name: geopulse-simulator
+    depends_on:
+      kafka-bootstrap:
+        condition: service_completed_successfully
+    environment:
+      KAFKA_BROKER: kafka:29092
+      SCENARIO: ${SCENARIO:-regional-anomaly}
+      NUM_ZONES: ${NUM_ZONES:-400}
+      SEED: ${SEED:-42}
+      SIM_STEP_MS: ${SIM_STEP_MS:-1000}
+      SPEED_MULTIPLIER: ${SPEED_MULTIPLIER:-60}
+      RUN_DURATION_MS: ${RUN_DURATION_MS:-14400000}
+      # Written where the eval harness can read it from the host, not into the container's
+      # filesystem. Ground truth that a benchmark cannot open is not ground truth.
+      GROUNDTRUTH_DIR: /repo/evals/groundtruth
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+    volumes:
+      - ../evals/groundtruth:/repo/evals/groundtruth
+    # A finished run is a finished run. Restarting it would replay the same seeded scenario on
+    # top of itself, which is a different and much less interesting experiment.
+    restart: "no"
 
 volumes:
   postgres_data:
