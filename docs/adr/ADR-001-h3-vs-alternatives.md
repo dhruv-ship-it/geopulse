@@ -230,3 +230,101 @@ close — against a true 25 km circle, cell adjacency scores 63–76% recall at 
 - **A build step.** Consumers depend on the package's compiled output through
   `file:../../packages/spatial`, so it must be built before a service compiles. `npm install`
   does it via `prepare`.
+
+---
+
+# Amendment (WP3, S7) — the ring size was wrong, and the reason it was wrong is instructive
+
+## Status
+
+Accepted. `NEIGHBOUR_RING_SIZE` default changes from **1 to 2**. The resolution is unchanged at 5.
+
+## What happened
+
+The first full end-to-end run against `SCENARIO=regional-anomaly` produced **three incidents**
+for one injected fault, with the engine reporting **seven connected components**.
+
+Detection was not the problem. All 62 zones the ground truth labels degraded, reached the
+correlation window, and were live members simultaneously — the live `members` count was exactly
+62, matching `evals/groundtruth/*-regional-anomaly-seed42.meta.json`. Nor was the correlation
+algorithm the problem: WP2a proved `TimeAwareConnectivity` against a naive oracle over 551,871
+compared operations with zero divergences. The union-find computed the components of the graph it
+was given, perfectly. **The graph was wrong.**
+
+## The reasoning error
+
+The paragraph above says the regional layout's "median nearest-neighbour distance of 15.7 km at
+400 zones" is "comfortably inside a one-ring reach". That sentence is the mistake, and it is
+wrong in a specific and generalisable way.
+
+It compares the reach to the distance between *zones*. What decides whether a patch of zones is
+one connected component is whether the *cells they occupy* form a connected set. Those come apart
+when occupancy is sparse:
+
+> 62 labelled zones occupy **61 distinct res-5 cells**.
+
+One zone per cell. The occupied cells are a scattered subset of the ~96 cells the anomaly disc
+covers, and ring-1 adjacency over a scattered subset fragments even though the points themselves
+are contiguous on the ground. Worse, 15.7 km is not comfortably inside the reach at all — res-5
+cells are about 16 km centre to centre, so a 15.7 km hop lands in the *adjacent* cell in the good
+case and two cells away in the ordinary case. WP1 measured the seam honestly at the time — "non-
+adjacent from 9.2 km; still adjacent at 31.7 km" — and the error was reading a median that sits
+inside that fuzzy band as if it sat above it.
+
+The tell that reach rather than resolution is the wrong knob: going *finer* makes it strictly
+worse. At res 6 those same 62 zones are 62 separate components.
+
+## The measurement
+
+`benchmarks/anomaly-connectivity.ts`, raw output in
+`benchmarks/results/wp3-anomaly-connectivity.txt`. It rebuilds the seeded zone field, takes each
+anomaly's labelled zone set from committed ground truth, and counts components under the real
+`NeighbourGraph`. No broker, no stack, re-runnable.
+
+| setting | regional (62 zones) | propagating (57) | multi A-001 (22) | multi A-002 (21) | multi, over-grouping |
+|---|---|---|---|---|---|
+| res 5 ring 1 | 7 | 10 | 4 | 7 | 11 components (2 wanted) |
+| **res 5 ring 2** | **1** | **1** | **1** | **1** | **2 components** ✓ |
+| res 5 ring 3 | 1 | 1 | 1 | 1 | 2 components ✓ |
+| res 4 ring 1 | 1 | 1 | 1 | 1 | 2 components ✓ |
+| res 6 ring 1 | 62 | 57 | 22 | 21 | 43 components |
+
+## Why res 5 ring 2 and not res 4 ring 1
+
+Both give one component per fault and keep the two `multi-anomaly` faults apart *on this data*.
+The difference is headroom, and headroom is the whole point — a reach generous enough to connect
+one fault is eventually generous enough to merge two, which is the over-grouping failure the
+`multi-anomaly` scenario exists to catch and which would make the headline collapse ratio look
+*better* while being less true.
+
+- Res 4 ring 1 reaches roughly 88 km. The scenario guarantees only `MIN_DISJOINT_SEPARATION_KM`
+  = 100 km of clear ground between faults. A 12 km margin.
+- Res 5 ring 2 reaches roughly 50 km. Half the separation. Twice the margin, same answer.
+
+Res 5 also keeps the detection resolution where the rest of the system already assumes it is:
+`H3_COARSE_RESOLUTION` = 3 is the partition key and ADR-004's reasoning about how many detection
+cells sit inside one coarse cell is written against res 5, and incident footprints are reported
+as res-5 cells.
+
+## The general rule, which is the part worth remembering
+
+**Adjacency reach must exceed the typical inter-zone spacing by enough that the occupied cells
+form a connected set — not merely enough that neighbouring zones are close.** A deployment with
+several zones per cell can use ring 1; one at roughly one zone per cell cannot. That makes the
+ring size a function of fleet density rather than of geography alone, which is why it stays an
+environment variable and why `benchmarks/anomaly-connectivity.ts` exists to tell you the value
+rather than leaving it to judgement.
+
+## Consequences
+
+- Neighbourhood size goes from 7 cells to 19 (`1 + 3k(k+1)`). `neighboursOf` is O(cells in the
+  disk + neighbours returned), so the fixed term roughly triples and the second term grows with
+  the neighbourhood — WP1's "constant area" measurements are the relevant ones and they already
+  show that curve. Still a constant against zone count, which is the property that mattered.
+- Every WP1 number quoted for ring 1 (recall/precision against a true 25 km circle, the 9.2/31.7
+  km seam) describes ring 1 and is now historical. They were never load-bearing for a claim.
+- Adjacency reaches further, so `multi-anomaly` retains less margin against over-grouping than it
+  had. The eval harness (WP6b) scores that directly, and it is the number to watch.
+- `packages/spatial/src/__tests__/sparseOccupancy.test.ts` pins the property in the test suite,
+  including an assertion that ring 1 *does* fragment — so putting it back is caught here rather
+  than in a benchmark six work packages later.

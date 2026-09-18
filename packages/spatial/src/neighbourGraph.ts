@@ -2,13 +2,64 @@ import { getResolution, gridDisk, isValidCell } from 'h3-js';
 import { H3_RESOLUTION, cellsFor } from './cells';
 
 /**
- * Size of the neighbourhood, in H3 rings. 1 means "this cell and the six cells touching it",
- * which at resolution 5 reaches roughly 25 km.
+ * Size of the neighbourhood, in H3 rings. 1 means "this cell and the six cells touching it";
+ * 2 adds the twelve beyond those, reaching roughly 50 km at resolution 5.
  *
  * This is the second half of the adjacency definition — the first half is H3_RESOLUTION — and
  * like the resolution it has to be identical in every process that reasons about incidents.
+ *
+ * ## Why 2, and why 1 was wrong
+ *
+ * It was 1 until the first full end-to-end run, which found the fragmentation failure the
+ * `regional-anomaly` scenario exists to catch. Every one of the 62 zones the ground truth labels
+ * degraded and reached the correlation window — detection was exact — and the engine still
+ * reported **seven components** and three separate incidents for one fault.
+ *
+ * The cause is not the correlation algorithm, which WP2a proved against a naive oracle over
+ * 551,871 operations. It is that **ring 1 was chosen for what "adjacent" means on the ground
+ * (~25 km) and not for how densely the fleet occupies cells.** Those are different questions,
+ * and only the second one decides whether a contiguous patch of zones is a connected graph:
+ *
+ *   62 labelled zones occupy **61 distinct res-5 cells**.
+ *
+ * One zone per cell. The occupied cells are therefore a sparse, scattered subset of the cells
+ * the anomaly disc covers, and ring-1 adjacency over a sparse subset fragments even when the
+ * underlying points are contiguous on the ground — the median nearest-neighbour distance here is
+ * 15.7 km against a res-5 centre-to-centre spacing of about 16 km, so a large share of genuinely
+ * neighbouring zones land two cells apart and are invisible to each other.
+ *
+ * Going *finer* makes it strictly worse, which is the tell: at res 6 the same 62 zones are 62
+ * separate components. The parameter that was wrong is the reach, not the resolution.
+ *
+ * Ring 2 fixes it, and `benchmarks/anomaly-connectivity.ts` is the measurement rather than the
+ * assertion — it is re-runnable from committed ground truth with no broker:
+ *
+ * | setting | regional (62 zones) | propagating (57) | multi A-001 (22) / A-002 (21) |
+ * |---|---|---|---|
+ * | res 5 ring 1 | 7 components | 10 | 4 / 7 |
+ * | **res 5 ring 2** | **1** | **1** | **1 / 1** |
+ * | res 4 ring 1 | 1 | 1 | 1 / 1 |
+ *
+ * ## Why not res 4 ring 1, which also works
+ *
+ * Because a bigger neighbourhood is not free, and the cost is over-grouping: an adjacency that
+ * is generous enough to connect one fault will eventually be generous enough to merge two. The
+ * `multi-anomaly` scenario places its two anomalies at least 100 km apart precisely so that a
+ * correct engine has no excuse to join them, and the same script checks that — ring 2 keeps them
+ * as 2 components. Res 4 ring 1 does too *today*, but its reach is roughly 88 km against that
+ * 100 km separation, which is a 12 km margin. Res 5 ring 2 reaches about 50 km, which is half the
+ * separation. Same answer on this data, twice the headroom, and it keeps the detection resolution
+ * where the partition-key reasoning (ADR-004) and the cell-level footprints already assume it is.
+ *
+ * ## What this means generally
+ *
+ * The reach has to exceed the typical inter-zone spacing by enough that the *occupied* cells
+ * form a connected set — not merely enough that neighbouring zones are close. A deployment with
+ * several zones per cell could use ring 1; this one, at roughly one zone per cell, cannot. That
+ * makes the ring size a function of fleet density, which is why it is an environment variable
+ * with a script that tells you the right value rather than a number someone picked once.
  */
-export const NEIGHBOUR_RING_SIZE = parseInt(process.env.NEIGHBOUR_RING_SIZE || '1', 10);
+export const NEIGHBOUR_RING_SIZE = parseInt(process.env.NEIGHBOUR_RING_SIZE || '2', 10);
 
 /**
  * The minimum a zone has to supply to be placed in the graph. `ZoneRegistryEntry` from the
