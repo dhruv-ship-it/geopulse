@@ -39,8 +39,12 @@
 | WP6b | Eval harness + benchmarks | ☐ Not started | **Fully unblocked** as of S7 — the whole pipeline runs end to end and writes incidents to Postgres, so the harness can score either the live output or an offline replay. Two things it must do: call `CorrelationEngine.flush()` at the end of a replay (the grid reconciles a boundary when a *later* message crosses it, so the final tick is otherwise never announced), and record `RECONCILE_TICK_MS` alongside every number. |
 | WP7 | Docs, ADRs, README, resume | ☐ Not started | |
 
-Status legend: ☐ not started · ◐ in progress · ☑ done (acceptance criteria met) · ⚠ done but
-understanding checkpoint not yet passed
+Status legend: ☐ not started · ◐ in progress · ☑ done (acceptance criteria met) · ⚠ built and
+working, but an acceptance criterion is not cleanly met and the gap is stated rather than tuned
+away
+
+Understanding checkpoints are tracked in their own table below, not in this column — code can be
+done while understanding is not, and conflating the two hides which is missing.
 
 ---
 
