@@ -489,6 +489,12 @@ describe('IncidentLifecycle — event time and input validation', () => {
     expect(() => incidents.reconcile([['A']], NaN)).toThrow(/finite/);
   });
 
+  it('defaults to the documented INCIDENT_MIN_ZONES and INCIDENT_CLOSE_GRACE_MS', () => {
+    // The table in `01-ARCHITECTURE.md` section 7 is the contract; pinning it here means a
+    // changed default is a failing test rather than a silently different collapse ratio.
+    expect(new IncidentLifecycle().geometry).toEqual({ minZones: 3, closeGraceMs: 60000 });
+  });
+
   it('rejects nonsense configuration at construction', () => {
     expect(() => new IncidentLifecycle({ minZones: 0 })).toThrow(/minZones/);
     expect(() => new IncidentLifecycle({ minZones: 2.5 })).toThrow(/minZones/);
