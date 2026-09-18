@@ -6,10 +6,11 @@ import * as core from '../index';
  * build somewhere else, the same way `@geopulse/spatial` pins its own.
  */
 describe('correlation core public API', () => {
-  it('exports the window, both connectivity implementations, and the shared contract', () => {
+  it('exports the window, both connectivity implementations, the lifecycle, and the contract', () => {
     expect(Object.keys(core).sort()).toEqual(
       [
         'CorrelationWindow',
+        'IncidentLifecycle',
         'NaiveConnectivity',
         'TimeAwareConnectivity',
         'canonicalise',

@@ -7,8 +7,9 @@
  * lets the eval harness (WP6b) replay a ground-truth scenario through the same code the service
  * runs, without standing up the stack.
  *
- * `IncidentLifecycle` — component to incident, with OPENED / GREW / MERGED / SHRANK / CLOSED —
- * is WP2b and lands next. It will be exported from here too.
+ * The three pieces compose in one direction: `CorrelationWindow` decides who is a member,
+ * `TimeAwareConnectivity` turns membership plus adjacency into a partition, and
+ * `IncidentLifecycle` turns that partition into named, long-lived incidents.
  */
 export {
   AdjacencyProvider,
@@ -22,5 +23,15 @@ export {
   CorrelationWindowStats,
   WindowMember
 } from './correlationWindow';
+export {
+  IncidentCloseReason,
+  IncidentEvent,
+  IncidentEventType,
+  IncidentLifecycle,
+  IncidentLifecycleOptions,
+  IncidentLifecycleStats,
+  IncidentSnapshot,
+  IncidentStatus
+} from './incidentLifecycle';
 export { NaiveConnectivity } from './naiveConnectivity';
 export { TimeAwareConnectivity, TimeAwareConnectivityStats } from './timeAwareConnectivity';
