@@ -1,5 +1,13 @@
 import { Kafka, Producer, Partitioners } from 'kafkajs';
 
+/**
+ * Where dead letters go by default.
+ *
+ * `zone.degradations.dlq` is the DLQ for `zone.degradations`, and it is named after the topic it
+ * shadows. For a while it was not: the topic was created under this name while the only consumer
+ * still read `zone.alerts`, so the DLQ and its source belonged to two differently-named topic
+ * families and nothing pointed that out. WP3's rename is what makes the name true.
+ */
 export const DLQ_TOPIC = process.env.DLQ_TOPIC || 'zone.degradations.dlq';
 
 export interface DeadLetterRecord {

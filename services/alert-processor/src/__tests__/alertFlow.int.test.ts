@@ -1,12 +1,12 @@
 import { Kafka, Producer, Consumer, Partitioners } from 'kafkajs';
 import { createClient, RedisClientType } from 'redis';
-import { ZoneAlert } from '../types';
+import { ZoneDegradation } from '../types';
 import { AlertProcessor } from '../alertProcessor';
 import { PostgresClient } from '../postgresClient';
 import { KafkaAlertConsumer } from '../kafkaConsumer';
 
 /**
- * End-to-end: produce to zone.alerts, let the REAL KafkaAlertConsumer and the REAL
+ * End-to-end: produce to zone.degradations, let the REAL KafkaAlertConsumer and the REAL
  * AlertProcessor consume it, assert it landed in both Redis and Postgres.
  *
  * Requires the infra stack:
@@ -25,7 +25,7 @@ const KAFKA_BROKER = process.env.KAFKA_BROKER || 'localhost:9092';
 const REDIS_HOST = process.env.REDIS_HOST || 'localhost';
 const REDIS_PORT = process.env.REDIS_PORT || '6390';
 const REDIS_PASSWORD = process.env.REDIS_PASSWORD || 'geopulse-dev';
-const ALERTS_TOPIC = 'zone.alerts';
+const DEGRADATIONS_TOPIC = 'zone.degradations';
 const DLQ_TOPIC = 'zone.degradations.dlq';
 const GLOBAL_KEY = 'alerts:global';
 
@@ -103,7 +103,7 @@ describeIntegration('alert flow (integration)', () => {
     await consumer.connect();
 
     const processor = new AlertProcessor(redis, postgres);
-    await consumer.startConsuming((alert) => processor.persistAlert(alert));
+    await consumer.startConsuming((degradation) => processor.persistAlert(degradation));
 
     // Let the group finish joining before producing, otherwise fromBeginning:false drops it.
     await sleep(3000);
@@ -117,19 +117,26 @@ describeIntegration('alert flow (integration)', () => {
     if (redis) await redis.disconnect();
   }, 30000);
 
-  it('persists a produced alert to Redis and Postgres via the real consumer', async () => {
-    const alert: ZoneAlert = {
+  it('persists a produced degradation to Redis and Postgres via the real consumer', async () => {
+    const degradation: ZoneDegradation = {
       zoneId,
+      h3Cell: '85283473fffffff',
+      h3CoarseCell: '83283ffffffffff',
+      latitude: 37.7749,
+      longitude: -122.4194,
       previousState: 'NORMAL',
       currentState: 'STRESSED',
+      severity: 0.78,
       avg1m: 0.45,
       avg5m: 0.78,
-      timestamp: Date.now()
+      eventTime: Date.now()
     };
 
     await producer.send({
-      topic: ALERTS_TOPIC,
-      messages: [{ key: alert.zoneId, value: JSON.stringify(alert) }]
+      topic: DEGRADATIONS_TOPIC,
+      // Keyed by coarse cell, exactly as stream-processor keys it: the DLQ headers carry the
+      // key through, so a replay puts the message back on the partition it came from.
+      messages: [{ key: degradation.h3CoarseCell, value: JSON.stringify(degradation) }]
     });
 
     const row = await waitFor(
@@ -140,7 +147,7 @@ describeIntegration('alert flow (integration)', () => {
         return result.rows.length > 0 ? result.rows[0] : null;
       },
       30000,
-      'the alert to reach Postgres'
+      'the degradation to reach Postgres'
     );
     expect(row.current_state).toBe('STRESSED');
 
@@ -148,12 +155,12 @@ describeIntegration('alert flow (integration)', () => {
       async () => {
         const entries = await redis.lRange(GLOBAL_KEY, 0, 50);
         const match = entries
-          .map((e) => JSON.parse(e) as ZoneAlert)
+          .map((e) => JSON.parse(e) as ZoneDegradation)
           .find((e) => e.zoneId === zoneId);
         return match ?? null;
       },
       15000,
-      'the alert to reach the Redis recent-alerts list'
+      'the degradation to reach the Redis recent-history list'
     );
     expect(cached.avg5m).toBe(0.78);
 
@@ -168,38 +175,43 @@ describeIntegration('alert flow (integration)', () => {
    * refuse the insert — no mocking, no fault injection. Before the fix this message would
    * have been logged once and the offset committed; it must now be recoverable from the DLQ.
    */
-  it('routes an alert Postgres rejects to the DLQ instead of dropping it', async () => {
+  it('routes a degradation Postgres rejects to the DLQ instead of dropping it', async () => {
     const overLongZoneId = 'Z-THIS-ID-IS-FAR-TOO-LONG';
-    const doomed: ZoneAlert = {
+    const doomed: ZoneDegradation = {
       zoneId: overLongZoneId,
+      h3Cell: '85283473fffffff',
+      h3CoarseCell: '83283ffffffffff',
+      latitude: 37.7749,
+      longitude: -122.4194,
       previousState: 'STRESSED',
       currentState: 'CRITICAL',
+      severity: 0.91,
       avg1m: 0.97,
       avg5m: 0.91,
-      timestamp: Date.now()
+      eventTime: Date.now()
     };
 
     await producer.send({
-      topic: ALERTS_TOPIC,
-      messages: [{ key: doomed.zoneId, value: JSON.stringify(doomed) }]
+      topic: DEGRADATIONS_TOPIC,
+      messages: [{ key: doomed.h3CoarseCell, value: JSON.stringify(doomed) }]
     });
 
     const parked = await waitFor(
       async () =>
         deadLetters.find((d) => {
           try {
-            return (JSON.parse(d.value) as ZoneAlert).zoneId === overLongZoneId;
+            return (JSON.parse(d.value) as ZoneDegradation).zoneId === overLongZoneId;
           } catch {
             return false;
           }
         }) ?? null,
       40000,
-      'the rejected alert to reach the dead letter queue'
+      'the rejected degradation to reach the dead letter queue'
     );
 
     // Recoverable byte for byte.
     expect(JSON.parse(parked.value)).toEqual(doomed);
-    expect(parked.headers['x-source-topic']).toBe(ALERTS_TOPIC);
+    expect(parked.headers['x-source-topic']).toBe(DEGRADATIONS_TOPIC);
     expect(parked.headers['x-failure-reason']).toBe('handler-failed');
     expect(parked.headers['x-failure-attempts']).toBe('2');
     expect(parked.headers['x-failure-error']).toMatch(/too long|value too long/i);

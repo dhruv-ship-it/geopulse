@@ -1,6 +1,6 @@
 import { AlertProcessor } from '../alertProcessor';
 import { PostgresClient, ZoneAlertRow } from '../postgresClient';
-import { ZoneAlert } from '../types';
+import { ZoneDegradation } from '../types';
 
 /**
  * Tests the real AlertProcessor. The previous version of this suite declared its own
@@ -40,18 +40,23 @@ class CapturingPostgresClient extends PostgresClient {
   }
 }
 
-const alert = (overrides: Partial<ZoneAlert> = {}): ZoneAlert => ({
+const alert = (overrides: Partial<ZoneDegradation> = {}): ZoneDegradation => ({
   zoneId: 'Z-0007',
+  h3Cell: '85283473fffffff',
+  h3CoarseCell: '83283ffffffffff',
+  latitude: 37.7749,
+  longitude: -122.4194,
   previousState: 'STRESSED',
   currentState: 'CRITICAL',
+  severity: 0.84,
   avg1m: 0.93,
   avg5m: 0.84,
-  timestamp: 1_700_000_000_000,
+  eventTime: 1_700_000_000_000,
   ...overrides
 });
 
 describe('AlertProcessor', () => {
-  it('writes the alert to Postgres with the column mapping the schema expects', async () => {
+  it('writes the degradation to Postgres with the column mapping the schema expects', async () => {
     const postgres = new CapturingPostgresClient();
     const redis = fakeRedis();
     await new AlertProcessor(redis.client, postgres).persistAlert(alert());
@@ -75,7 +80,7 @@ describe('AlertProcessor', () => {
 
     expect([...redis.lists.keys()].sort()).toEqual(['alerts:global', 'alerts:zone:Z-0007']);
 
-    const global: ZoneAlert = JSON.parse(redis.lists.get('alerts:global')![0]);
+    const global: ZoneDegradation = JSON.parse(redis.lists.get('alerts:global')![0]);
     expect(global.zoneId).toBe('Z-0007');
 
     // The per-zone entry omits zoneId — the key already carries it.
@@ -83,23 +88,24 @@ describe('AlertProcessor', () => {
     expect(perZone).toEqual({
       previousState: 'STRESSED',
       currentState: 'CRITICAL',
+      severity: 0.84,
       avg1m: 0.93,
       avg5m: 0.84,
-      timestamp: 1_700_000_000_000
+      eventTime: 1_700_000_000_000
     });
     expect(perZone.zoneId).toBeUndefined();
   });
 
-  it('keeps the newest alert at the head of each list', async () => {
+  it('keeps the newest degradation at the head of each list', async () => {
     const postgres = new CapturingPostgresClient();
     const redis = fakeRedis();
     const processor = new AlertProcessor(redis.client, postgres);
 
-    await processor.persistAlert(alert({ timestamp: 1 }));
-    await processor.persistAlert(alert({ timestamp: 2 }));
+    await processor.persistAlert(alert({ eventTime: 1 }));
+    await processor.persistAlert(alert({ eventTime: 2 }));
 
-    const head: ZoneAlert = JSON.parse(redis.lists.get('alerts:global')![0]);
-    expect(head.timestamp).toBe(2);
+    const head: ZoneDegradation = JSON.parse(redis.lists.get('alerts:global')![0]);
+    expect(head.eventTime).toBe(2);
   });
 
   it('trims both lists to their configured caps', async () => {

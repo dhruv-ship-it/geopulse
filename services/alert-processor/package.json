@@ -19,14 +19,16 @@
   ],
   "author": "GeoPulse Team",
   "license": "MIT",
-  "description": "GeoPulse Alert Processor - consumes zone.alerts and persists alert history in Redis",
+  "description": "GeoPulse Alert Processor - consumes zone.degradations and zone.incidents and makes both durable in Postgres and Redis",
   "dependencies": {
+    "@geopulse/kafka-recovery": "file:../../packages/kafka-recovery",
+    "@geopulse/spatial": "file:../../packages/spatial",
     "@types/node": "^25.2.0",
     "@types/pg": "^8.11.11",
     "dotenv": "^17.2.3",
     "kafkajs": "^2.2.4",
-    "pino": "^9.0.0",
     "pg": "^8.13.1",
+    "pino": "^9.0.0",
     "prom-client": "^15.0.0",
     "redis": "^5.10.0",
     "typescript": "^5.9.3"

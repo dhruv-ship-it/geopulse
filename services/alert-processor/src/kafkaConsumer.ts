@@ -1,12 +1,18 @@
 import { Kafka, Consumer, EachMessagePayload } from 'kafkajs';
-import { ZoneAlert } from './types';
-import { KafkaDeadLetterProducer, DeadLetterPublisher } from './deadLetter';
-import { processWithRecovery, RetryPolicy, DEFAULT_RETRY_POLICY } from './messageRecovery';
+import {
+  DeadLetterPublisher,
+  KafkaDeadLetterProducer,
+  processWithRecovery,
+  retryPolicyFromEnv,
+  RetryPolicy
+} from '@geopulse/kafka-recovery';
+
+import { ZoneDegradation } from './types';
 import { logger } from './logger';
 import { alertsDeadLetteredTotal, alertRetriesTotal } from './metrics';
 
 const KAFKA_BROKER = process.env.KAFKA_BROKER || 'localhost:9092';
-const ALERTS_TOPIC = 'zone.alerts';
+const DEGRADATIONS_TOPIC = process.env.DEGRADATIONS_TOPIC || 'zone.degradations';
 const CONSUMER_GROUP = 'alert-processor';
 
 export interface AlertConsumerOptions {
@@ -18,19 +24,31 @@ export interface AlertConsumerOptions {
   fromBeginning?: boolean;
 }
 
+/**
+ * Consumes `zone.degradations` and hands each message to a persistence handler.
+ *
+ * ## Failure policy: dead-letter, not drop
+ *
+ * `processWithRecovery` makes the choice explicit at the call site, and this service chooses the
+ * expensive one. A degradation is a *derived fact* — the state machine ran, a zone crossed a
+ * threshold, and this message is the only record of that having happened. Nothing re-emits it:
+ * the state machine has already advanced past the transition, so a dropped message is a hole in
+ * the history that nothing will ever fill. `stream-processor` makes the opposite call about the
+ * raw samples it derived this from, and the reasoning for both is in ADR-000's amendment.
+ */
 export class KafkaAlertConsumer {
   private kafka: Kafka;
   private consumer: Consumer;
   private deadLetterProducer: KafkaDeadLetterProducer;
   private isConnected: boolean = false;
-  private messageHandler: ((alert: ZoneAlert) => Promise<void>) | null = null;
+  private messageHandler: ((degradation: ZoneDegradation) => Promise<void>) | null = null;
   private policy: RetryPolicy;
   private topic: string;
   private fromBeginning: boolean;
 
   constructor(options: AlertConsumerOptions = {}) {
-    this.policy = options.policy ?? DEFAULT_RETRY_POLICY;
-    this.topic = options.topic ?? ALERTS_TOPIC;
+    this.policy = options.policy ?? retryPolicyFromEnv('ALERT');
+    this.topic = options.topic ?? DEGRADATIONS_TOPIC;
     this.fromBeginning = options.fromBeginning ?? true;
 
     this.kafka = new Kafka({
@@ -72,7 +90,7 @@ export class KafkaAlertConsumer {
     return this.deadLetterProducer;
   }
 
-  async startConsuming(handler: (alert: ZoneAlert) => Promise<void>): Promise<void> {
+  async startConsuming(handler: (degradation: ZoneDegradation) => Promise<void>): Promise<void> {
     if (!this.isConnected) throw new Error('Consumer not connected');
     this.messageHandler = handler;
 
@@ -80,30 +98,31 @@ export class KafkaAlertConsumer {
       eachMessage: async ({ topic, partition, message }: EachMessagePayload) => {
         // No try/catch here on purpose. Anything processWithRecovery throws must escape
         // eachMessage so kafkajs does not commit the offset.
-        const disposition = await processWithRecovery<ZoneAlert>({
+        const disposition = await processWithRecovery<ZoneDegradation>({
           value: message.value,
           key: message.key,
           topic,
           partition,
           offset: message.offset,
-          parse: (raw) => JSON.parse(raw.toString()) as ZoneAlert,
-          handle: async (alert) => {
-            if (this.messageHandler) await this.messageHandler(alert);
+          parse: (raw) => JSON.parse(raw.toString()) as ZoneDegradation,
+          handle: async (degradation) => {
+            if (this.messageHandler) await this.messageHandler(degradation);
           },
+          onFailure: 'dead-letter',
           deadLetter: this.deadLetterProducer,
           policy: this.policy,
           onRetry: (attempt, delayMs, err) => {
             alertRetriesTotal.inc();
             logger.warn(
               { attempt, delayMs, error: err, topic, partition, offset: message.offset },
-              'Alert persistence failed; retrying'
+              'Degradation persistence failed; retrying'
             );
           },
           onDeadLetter: (reason, err) => {
             alertsDeadLetteredTotal.labels(reason).inc();
             logger.error(
               { reason, error: err, topic, partition, offset: message.offset },
-              'Alert exhausted recovery; routing to dead letter queue'
+              'Degradation exhausted recovery; routing to dead letter queue'
             );
           }
         });
@@ -114,6 +133,6 @@ export class KafkaAlertConsumer {
       }
     });
 
-    logger.info('Alert consumer started');
+    logger.info('Degradation consumer started');
   }
 }
