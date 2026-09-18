@@ -292,6 +292,74 @@ The unbounded-map defect is fixed with an idle TTL. At a million zones the real 
 one process can't hold it — that is what the coarse-cell partitioning is for, and the number of
 partitions is then sized by state-per-partition rather than by throughput.
 
+**Q20. Tell me about a bug your tests couldn't have caught.** The first end-to-end run produced
+seven incidents from one injected fault. Every test passed — 283 of them, including a differential
+fuzz against a naive oracle with zero divergences and property tests over 156,773 invariant checks.
+The engine was correct. The *answer* was wrong.
+
+The adjacency graph was configured as H3 resolution 5 with a ring size of 1 — "same cell, or one of
+its six neighbours", about 25 km on the ground. The fault had a 95 km radius and the zone field puts
+neighbours roughly 15 km apart, so its 62 zones landed in 61 distinct cells and simply were not one
+connected component. The engine computed the connected components of the graph it was given,
+faithfully, and reported them. Its input had already been fragmented two layers away, by a constant.
+
+What I did about it is the part I would want to be asked about. I did not nudge the ring size until
+the number looked right — that is indistinguishable from tuning until you get the answer you wanted.
+I wrote a benchmark that measures, for every injected anomaly in all four scenarios, how many
+components its labelled zones form under three resolutions crossed with three ring sizes. Res 5
+ring 1 gives 7 components for the regional fault; ring 2 gives 1. The same table also checks the
+opposite failure: under ring 2 the multi-anomaly scenario's two faults stay 2 components and the 16
+noise zones stay 16, so it is not merely a looser setting that smears everything together. That is
+the measurement that distinguishes "correct" from "tuned", and it is committed alongside the change.
+
+The generalisable lesson: geometry is a parameter, and a parameter is only defensible against
+measured evidence. No amount of testing the code finds a wrong constant, because the code is doing
+exactly what it was told. This is also the reason the end-to-end gate exists at all — it is the
+only place in the build plan where a wrong parameter can surface.
+
+**Q21. You use `eachBatch`. Why, and did it work?** The original argument was that a regional fault
+arrives as a burst — 62 zones within seconds — and reconciling after every message would emit an
+`OPENED` plus 61 `GREW`s, each obsoleted by the next, all published and persisted. Reconciling once
+per batch emits one `OPENED` with 62 members. Not a throughput optimisation: the output is *better*,
+because a lifecycle stream is read by a person and should describe the fault rather than the arrival
+order of the messages that revealed it.
+
+It did not work, and I know that because I instrumented the claim rather than assuming it. There is
+a histogram, `degradation_batch_size`, whose comment said: if this sits at 1 during a storm, the
+claim is false and the complexity is not being paid for. The live run measured 70 messages across 68
+batches. Degradations are rare and the pipeline keeps up, so kafkajs hands them over as they arrive.
+Per-batch reconciling had degenerated into per-message reconciling *precisely when the system was
+healthy*, and consolidated only when it was lagging. It delivered none of the benefit it was chosen
+for while carrying a real cost.
+
+That cost was determinism. Incident ids are `SHA-256(scheme | openedAt | members)` and `openedAt`
+was the reconcile watermark, so where the broker drew a fetch boundary decided what an incident was
+*called*. Output was byte-identical only for a fixed batching, which is a property of the fetch and
+not of the data.
+
+The fix is to reconcile on a fixed event-time grid instead: every `RECONCILE_TICK_MS` of event time,
+crossing as many boundaries as a batch spans. A boundary `B` is reconciled when the first message
+with `eventTime > B` arrives, so that reconcile sees exactly the messages at or before `B`, whatever
+the broker did. `openedAt` lands on a tick multiple and the whole output becomes a function of the
+message stream alone — there is a test that runs the same twelve messages under four different
+batchings and asserts byte-identical output including ids.
+
+`eachBatch` stayed. The batch is still the right unit for resolving offsets and for dispatch; it was
+never the right unit for deciding *what happened*. Conflating a transport boundary with a semantic
+one was the actual mistake, and it is worth saying that the code was not wrong — the abstraction
+boundary was in the wrong place.
+
+**Q22. What does that grid cost you?** A component that forms and dissolves entirely inside one tick
+is never observed. That was true before as well; it was just a broker artefact rather than a stated
+interval, which is strictly worse because you cannot write it down. `RECONCILE_TICK_MS` is now an
+explicit statement of the resolution at which the system is willing to describe change, and at 5 s
+against a 120 s correlation window it is two orders of magnitude finer than the thing being measured.
+
+It also fixed something I was not aiming at. Under the old cadence an incident whose grace period
+expired at T was reported closed at whatever watermark the next unrelated message happened to carry.
+On the grid it closes at the first boundary past T, because the gap is crossed one boundary at a
+time. The close is now dated to when the incident ended rather than to who reported next.
+
 ---
 
 ## 4. Understanding checkpoints (self-test before each WP is "done")
