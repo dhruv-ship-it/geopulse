@@ -360,6 +360,54 @@ expired at T was reported closed at whatever watermark the next unrelated messag
 On the grid it closes at the first boundary past T, because the gap is crossed one boundary at a
 time. The close is now dated to when the incident ended rather than to who reported next.
 
+**Q23. What is the worst bug you shipped in this, and how did you find it?** The system closed an
+incident in the middle of the fault that caused it, and reported that nothing was wrong for 2.2
+simulated hours.
+
+The shape of it: `stream-processor` is edge-triggered. Its state machine fires when a zone
+*changes* state, which is exactly right for a component whose job is persisting transitions — a
+transition happens once, and repeating it would be noise. The correlation window is
+level-expecting. Its membership rule is "a zone is an active member while it has degraded within
+the last `CORRELATION_WINDOW_MS`", and that rule integrates a signal: it assumes the signal keeps
+arriving.
+
+Nothing connected those two assumptions. 62 zones crossed into STRESSED over about 80 seconds and
+then went completely silent for the next two hours, because none of them changed state again — they
+were all still degraded the entire time. The correlation engine holds no clock by design, so its
+event-time watermark advances only because messages carry it. With no messages, the watermark froze.
+Its 120-second window then expired every member, and the incident closed. When the fault finally
+decayed and zones started transitioning again, the engine fast-forwarded 1,610 grid ticks and opened
+*new* incidents, because CRITICAL→STRESSED is still a degradation and it re-admitted zones it had
+long since forgotten. One injected fault, seven incidents, and an 8,070-second hole in the middle.
+
+Two things about how it was found. First, only a full-length end-to-end run could find it — I had
+an earlier truncated run that passed, and it passed only because I stopped it before the window had
+time to lapse. Second, nothing was broken in a way that any of the usual signals would show: no
+crash, no exception, no dropped message, no failed assertion. 283 unit tests passed, a differential
+fuzz against a naive oracle reported zero divergences across 551,871 operations, and property tests
+checked 156,773 invariants. Every one of them was testing a component that was working. The output
+was confident, well-formed, fully persisted, geometrically correct — and wrong.
+
+The fix is that a zone in a non-NORMAL state re-publishes its degradation every 30 seconds of event
+time. What I would want to be asked is why not the simpler thing: keep a zone a member until an
+explicit recovery arrives, and drop the window. That trades this bug for a worse one — a
+`stream-processor` that dies while holding degraded zones never produces the recovery that would
+release them, so those zones stay in an incident forever, and the failure is silent and looks
+exactly like an ongoing fault. Time-bounded membership means the system's belief decays in the
+absence of evidence, which is the property you want from anything that monitors. The window was
+never the bug; the missing signal was. Re-assertion supplies it.
+
+The interval is 30 seconds against a 120-second window, deliberately — four assertions per window,
+so it takes three consecutive publish failures to drop a zone out of its incident. At one per window
+a single lost message would make the incident flicker.
+
+There is a coda I like. An earlier ADR justified *dropping* a failed raw sensor event on the grounds
+that "a degradation is one sample of a signal that is re-sampled every second". That was true of the
+sensor signal and false of the degradation signal at the moment I wrote it — the justification was
+true of the thing standing next to the one it was about. Fixing D14 made it true of both. Plausible
+reasoning that is subtly about the wrong object is, I think, a more dangerous failure mode than
+reasoning that is obviously wrong.
+
 ---
 
 ## 4. Understanding checkpoints (self-test before each WP is "done")

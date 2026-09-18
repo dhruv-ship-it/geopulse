@@ -32,7 +32,7 @@
 | WP1 | Spatial layer (H3 neighbour graph) | ☑ Done | `@geopulse/spatial` — `NeighbourGraph` plus the cells module moved out of stream-processor. All three acceptance criteria met: lookup flat at 0.58→1.03 µs across 1k→100k zones against 39.6→4630.7 µs for a naive scan; antimeridian, polar and pentagon tests; ADR-001. Understanding checkpoint still owed. |
 | WP2a | Correlation core — window + connectivity | ☑ Done | `CorrelationWindow`, `TimeAwareConnectivity` (union-find + local rebuild), `NaiveConnectivity` (the oracle), and the differential fuzz. Acceptance met: **11,000 sequences / 551,871 operations, 0 divergences**. ADR-002. Understanding checkpoint still owed. |
 | WP2b | Correlation core — `IncidentLifecycle` | ☑ Done | OPENED / GREW / MERGED / SHRANK / CLOSED, `DRAINING` as the third status, SHA-256 incident ids, merge by age, split by inheritance. Acceptance met: **2,500 property sequences / 156,773 invariant checks, 0 violations**, and a byte-identical replay over 1,000 of them. 100% statements and branches on the module. ADR-003. Understanding checkpoint still owed. |
-| WP3 | `correlation-engine` service | ☑ Done | All eight items. S6 built the service (1–5, 7); S7 added Postgres persistence (item 6 — `incidents` / `incident_members` / `incident_events`, a second consumer group inside `alert-processor`), the `stream-processor` degradation producer (item 8, recoveries included), and Dockerfiles for every service. **All three acceptance criteria met against live infrastructure**: one regional anomaly → one incident, `docker compose up` brings up the full stack, `/metrics` exposes every listed metric. Two real defects found by the live run and fixed — D12 (adjacency too tight) and the reconcile cadence. ADR-004 + amendment. **283 tests in the engine, 97.29% stmts / 96.97% branches.** Understanding checkpoint still owed. |
+| WP3 | `correlation-engine` service | ☑ Done | All eight items. S6 built the service (1–5, 7); S7 added Postgres persistence (item 6 — `incidents` / `incident_members` / `incident_events`, a second consumer group inside `alert-processor`), the `stream-processor` degradation producer (item 8, recoveries included), and Dockerfiles for every service. **All three acceptance criteria met against live infrastructure**: one regional anomaly → one incident, `docker compose up` brings up the full stack, `/metrics` exposes every listed metric. Three real defects found by the live run and fixed — D12 (adjacency too tight), D13 (the reconcile cadence) and D14 (edge-triggered producer against a level-expecting window). ADR-004 + amendment, ADR-008. **283 tests in the engine, 97.29% stmts / 96.97% branches.** Understanding checkpoint still owed. |
 | WP4 | Propagation vector | ☐ Not started | |
 | WP5 | API + live map UI | ☐ Not started | |
 | WP6a | Simulator ground truth | ☑ Done | All four scenarios inject, all four emit §2-schema labels, determinism asserted byte-for-byte, labels verified against the real state machine. ADR-006. Understanding checkpoint still owed. |
@@ -75,6 +75,7 @@ truly complete when both are ticked.
 | ADR-007 | A Kafka record timestamp is not application event time | ☑ Written (S2c) |
 | ADR-000 (amendment) | One recovery implementation, two failure policies: why a sensor event is dropped and a degradation is dead-lettered | ☑ Written (S7) |
 | ADR-004 (amendment) | Reconcile on an event-time grid, not per batch | ☑ Written (S7) |
+| ADR-008 | Degradation is a level, not an edge: periodic re-assertion | ☑ Written (S7) |
 
 ---
 
@@ -160,6 +161,7 @@ Tracked from `01-ARCHITECTURE.md` §3.
 | D11 | `ZoneStateStore` takes its watermark as a global max over all zones, not a minimum across partitions | ☐ Open, **unobserved**. Sound in theory, 0 evictions measured across 400 zones and 5.76M events. Deliberately not fixed — see `01-ARCHITECTURE.md` §3.5. |
 | D12 | One regional fault fragments into seven incidents — H3 res-5 ring-1 adjacency is tighter than the zone spacing, so 62 co-degrading adjacent zones are not one component | ☑ Closed — S7. **Found by the first end-to-end run, which is exactly what it was for.** `NEIGHBOUR_RING_SIZE` 1 → 2. Evidence across three resolutions × three ring sizes × all four scenarios: `benchmarks/results/wp3-anomaly-connectivity.txt`. Ring 2 gives one component for every injected anomaly and still keeps the multi-anomaly's two faults and the 16 noise zones apart. |
 | D13 | Incident ids depend on Kafka batch boundaries — `openedAt` is in the id preimage and was the per-batch reconcile watermark | ☑ Closed — S7. Flagged by S6, decided here with live batch sizes visible: the run measured **70 messages across 68 batches**, so per-batch reconciling had degenerated into per-message reconciling exactly when the pipeline was healthy. Reconciles now run on a fixed event-time grid (`RECONCILE_TICK_MS`). ADR-004 amendment. |
+| D14 | One regional fault produces seven incidents with an 8,070-second hole in the middle — `stream-processor` is edge-triggered, the correlation window is level-expecting, so a zone that degrades and stays degraded is forgotten mid-fault | ☑ Closed — S7. **Found by the first *full-length* end-to-end run**, after D12 had already been fixed; the truncated run that passed had simply not reached the point where the window lapsed. 62 zones crossed into STRESSED over 80 s and then emitted nothing for 2.2 simulated hours because nothing *changed*; the engine's watermark froze, its 120 s window expired every member, and the incident closed underneath a live fault. Fixed with `DEGRADATION_REASSERT_MS` (30 s of event time). Evidence: `benchmarks/results/wp3-e2e-regional-before-d14.txt`. ADR-008. |
 | D8 | Simulator event clock runs at 0.5–10% of real time and each zone's clock runs at a different rate (20× spread in 60s) | ☑ Closed — S2a. One shared virtual clock; per-zone lag is now a bounded offset. Before/after: `benchmarks/results/d8-simulator-event-clock.txt` vs `-after.txt`; rationale in `docs/adr/ADR-005-simulated-event-time.md`. |
 
 ---
@@ -174,9 +176,10 @@ Append one entry per working session. Newest at the top. Keep to 2–4 lines.
   regional anomaly, 62 zones degrading, **one incident**. Evidence:
   `benchmarks/results/wp3-e2e-regional.txt`, produced by `./benchmarks/e2e-regional-anomaly.sh`,
   which brings the whole stack up from a clean volume and checks the number itself.
-- **The end-to-end run found two real defects, which is exactly what it was for.** Both were
-  invisible to 283 passing unit tests, because both were wrong *parameters* rather than wrong
-  code — the kind of thing only live data reveals.
+- **The end-to-end run found three real defects, which is exactly what it was for.** All three
+  were invisible to 283 passing unit tests: two were wrong *parameters* rather than wrong code, and
+  the third (D14) was a mismatch between two components that were each behaving as specified. None
+  of them is reachable without live data.
 - **D12: adjacency was too tight, and one fault came out as seven incidents.** H3 res-5 ring-1
   adjacency means "same cell or one of its six neighbours", which at res 5 is about 25 km. The
   regional anomaly has a 95 km radius and the reference field puts zones ~15 km apart, so its 62
@@ -191,6 +194,35 @@ Append one entry per working session. Newest at the top. Keep to 2–4 lines.
   *wrong*, and no test of the engine could have found it — the component partition was a faithful
   report of an adjacency graph that had been configured wrong two layers away. Geometry is a
   parameter, and a parameter is only defensible against measured evidence.
+- **D14: the incident closed in the middle of its own fault.** Found by the first *full-length*
+  run, after D12 was already fixed — the earlier truncated run had passed because it had not yet
+  reached the point where the window lapsed, which is its own lesson about stopping a run early.
+  `stream-processor` is **edge**-triggered: `shouldAlert` fires only on a state *change*, which is
+  correct for something persisting transitions. The correlation window is **level**-expecting: "a
+  zone is an active member while it has degraded within the last `CORRELATION_WINDOW_MS`". 62 zones
+  crossed into STRESSED over 80 seconds and then said nothing for 2.2 simulated hours, because
+  nothing changed. The engine's watermark froze at 2555 s, its 120 s window expired every member at
+  2680 s, and the incident **closed while the fault was still running** — then re-opened in
+  fragments at the decay. One fault, seven incidents, and an 8,070-second hole in which the system
+  believed nothing was wrong.
+- **Neither component was wrong, which is the whole point of D14.** The state machine emits edges
+  because a transition is an event; the window integrates levels because membership is a duration.
+  Both are defensible in isolation and the bug lived entirely in the seam — which is why 283 unit
+  tests, a differential fuzz with zero divergences and 156,773 invariant checks all had nothing to
+  say about it. And the failure was not a crash or a dropped message: it was a confident,
+  well-formed, fully-persisted answer that was wrong.
+- **Fixed by re-assertion, not by permanent membership.** A zone in a non-NORMAL state republishes
+  its degradation every `DEGRADATION_REASSERT_MS` (30 s of event time, four per window). The
+  tempting alternative — keep a member until an explicit recovery arrives — trades this defect for
+  a worse one: a producer that dies holding degraded zones leaves them in an incident forever,
+  silently and looking exactly like an ongoing fault. Belief that decays without evidence is the
+  property you want from a monitoring system; re-assertion is what *supplies* the evidence.
+  ADR-008.
+- **It also made an existing claim true.** ADR-000's amendment justified dropping a failed sensor
+  event on the grounds that "a degradation is one sample of a signal re-sampled every second". That
+  was true of the *sensor* signal and false of the *degradation* signal at the moment it was
+  written. Worth noting as a class of error: a justification that is true of the thing next to the
+  one it is about.
 - **D13: the batching/determinism question from S6, decided with live data.** S6 flagged that
   `openedAt` is in the incident id preimage and was the per-batch reconcile watermark, so ids
   depended on where Kafka drew a boundary. The live run measured **70 messages across 68 batches
@@ -261,6 +293,12 @@ Added to the twelve at the end of the S6 entry.
     not? State it as a property of the output.
 17. `flush()` invents up to one tick of event time. Justify that, and say why it is safe at the end
     of a stream and would not be in the middle of one.
+18. D14: name the two components, say what each was doing correctly, and explain why joining them
+    produced an answer that was wrong rather than an error that was visible.
+19. Why is periodic re-assertion the right fix rather than keeping a member until its recovery
+    arrives? Describe the failure the second option has and why it is worse.
+20. `DEGRADATION_REASSERT_MS` is 30 s against a 120 s window. Justify the ratio — what does the
+    factor of four buy that a factor of one would not?
 
 ### 2026-09-18 — S6: WP3 items 1–5 and 7 (the `correlation-engine` service)
 

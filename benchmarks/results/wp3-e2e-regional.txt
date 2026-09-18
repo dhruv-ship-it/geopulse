@@ -1,95 +1,31 @@
 GeoPulse end-to-end acceptance — WP3
-generated: 2026-09-18T10:57:48Z
-commit:    74de429
+generated: 2026-09-18T11:52:43Z
+commit:    faf242a
 scenario:  regional-anomaly, 400 zones, seed 42, speed 60x
 
 ## Bringing the stack up from scratch
 
    Network geopulse_default  Created
    Volume geopulse_postgres_data  Created
-   Container geopulse-zookeeper  Created
-   Container geopulse-postgres  Created
    Container geopulse-redis  Created
-   Container geopulse-kafka  Created
+   Container geopulse-postgres  Created
+   Container geopulse-zookeeper  Created
    Container geopulse-api  Created
+   Container geopulse-kafka  Created
    Container geopulse-kafka-bootstrap  Created
-   Container geopulse-stream-processor  Created
    Container geopulse-alert-processor  Created
-   Container geopulse-simulator  Created
    Container geopulse-correlation-engine  Created
+   Container geopulse-simulator  Created
+   Container geopulse-stream-processor  Created
    Container geopulse-redis  Started
-   Container geopulse-postgres  Started
    Container geopulse-zookeeper  Started
+   Container geopulse-postgres  Started
    Container geopulse-api  Started
    Container geopulse-kafka  Started
    Container geopulse-kafka-bootstrap  Started
-   Container geopulse-correlation-engine  Started
    Container geopulse-stream-processor  Started
-   Container geopulse-simulator  Started
    Container geopulse-alert-processor  Started
+   Container geopulse-correlation-engine  Started
+   Container geopulse-simulator  Started
 
 ## Waiting for the simulator to finish (timeout 3600s)
-  simulator state: exited after 3012s
-  produced 5760000 events over 14401 simulated seconds
-  achieved speed: 4x real time (SPEED_MULTIPLIER=60 is a ceiling, not a promise)
-  draining for 45s so the correlation window lapses and the incident closes
-
-## Ground truth — what was injected
-
-  file: evals/groundtruth/20260115T120000Z-regional-anomaly-seed42.meta.json
-  anomalies injected: 0
-
-## Stage by stage
-
-  stream-processor (degradations published):
-    state transitions on the topic:
-      -> STRESSED: 109 transitions across 62 distinct zones
-      -> CRITICAL: 47 transitions across 47 distinct zones
-      -> NORMAL: 62 transitions across 62 distinct zones
-
-  correlation-engine (/health):
-    geometry:   window=120000ms compaction=5000ms reconcileTick=5000ms minZones=3 closeGrace=60000ms maxBatch=1000
-    batches:    218, messages 218 (156 degradations, 62 recoveries)
-    ticks:      68 reconciled, 1610 fast-forwarded
-    rejected:   0, stale 0
-    incidents:  {"reconciles":68,"membersReconciled":2471,"opened":7,"grew":13,"shrank":25,"merged":1,"closed":7,"superseded":1,"splits":8,"splitFragments":11,"idCollisions":0,"activeIncidents":0,"draining":0,"peakActiveIncidents":4,"watermark":1768489265000}
-    consumer:   {"batches":218,"messages":218,"skipped":0,"unparseable":0}
-    dispatcher: {"dispatched":53,"flushes":27,"retainedFlushes":0,"pending":0}
-
-## THE ANSWER — incidents in Postgres
-
-       incident_id      | status | member_count |   peak_severity    | radius_km |   opened_at   |   closed_at   
-  ----------------------+--------+--------------+--------------------+-----------+---------------+---------------
-   INC-7833bfd098e220b5 | CLOSED |            0 | 0.9503000000000005 |           | 1768480885000 | 1768481080000
-   INC-b8c5ff4a27cd92f2 | CLOSED |            0 |                  0 |           | 1768481045000 | 1768481080000
-   INC-d1fbed1027888df3 | CLOSED |            0 |                  0 |           | 1768481050000 | 1768481055000
-   INC-3438db97d1dd4d04 | CLOSED |            0 |  0.799870000000001 |           | 1768481050000 | 1768481080000
-   INC-ce9dcf47c73ca0d6 | CLOSED |           12 |  0.799870000000001 |      87.3 | 1768489150000 | 1768489155000
-   INC-12e31724e741a14f | CLOSED |            0 | 0.7999999999999969 |           | 1768489150000 | 1768489265000
-   INC-2702da1e86941e50 | CLOSED |            0 | 0.7986966666666656 |           | 1768489240000 | 1768489255000
-  (7 rows)
-  
-
-  incident timeline:
-   event_type | count 
-  ------------+-------
-   SHRANK     |    25
-   GREW       |    13
-   CLOSED     |     7
-   OPENED     |     7
-   MERGED     |     1
-  (5 rows)
-  
-
-================================================================
-  incidents:                 7
-  largest incident:          12 zones
-  distinct zones in members: 62
-  lifecycle events:          53
-  distinct zones degraded:   62
-  collapse:                  62 degraded zones -> 7 incident(s)
-================================================================
-
-  FAIL — expected exactly 1 incident, got 7.
-  This is the acceptance criterion for WP3. Do not record any downstream
-  number until it passes; they would all be measuring the wrong thing.
