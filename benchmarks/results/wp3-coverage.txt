@@ -1,0 +1,183 @@
+GeoPulse coverage report
+generated: 2026-09-18T02:51:59Z
+commit:    165cf07
+
+================================================================
+packages/spatial
+================================================================
+-------------------|---------|----------|---------|---------|-------------------
+File               | % Stmts | % Branch | % Funcs | % Lines | Uncovered Line #s 
+-------------------|---------|----------|---------|---------|-------------------
+All files          |   97.89 |    89.18 |   77.27 |   97.77 |                   
+ cells.ts          |     100 |      100 |     100 |     100 |                   
+ geo.ts            |     100 |      100 |     100 |     100 |                   
+ index.ts          |     100 |      100 |   28.57 |     100 |                   
+ neighbourGraph.ts |   97.18 |    87.09 |     100 |   97.18 | 256,263           
+-------------------|---------|----------|---------|---------|-------------------
+
+Test Suites: 3 passed, 3 total
+Tests:       31 passed, 31 total
+Time:        5.389 s
+
+================================================================
+services/sensor-simulator
+================================================================
+--------------------|---------|----------|---------|---------|-----------------------------------
+File                | % Stmts | % Branch | % Funcs | % Lines | Uncovered Line #s                 
+--------------------|---------|----------|---------|---------|-----------------------------------
+All files           |   72.07 |     58.3 |   73.91 |   71.52 |                                   
+ anomaly.ts         |     100 |    91.66 |     100 |     100 | 140-141                           
+ config.ts          |       0 |        0 |       0 |       0 | 1-122                             
+ geo.ts             |     100 |      100 |     100 |     100 |                                   
+ groundTruth.ts     |   97.14 |       72 |     100 |   96.72 | 112,252                           
+ kafkaProducer.ts   |   51.06 |    42.85 |   71.42 |   51.06 | 39-67,105,122-123,132,136,167-168 
+ loadGenerator.ts   |     100 |    95.45 |     100 |     100 | 82                                
+ logger.ts          |       0 |        0 |     100 |       0 | 1-3                               
+ prng.ts            |   96.55 |    85.71 |     100 |   96.29 | 67                                
+ scenarios.ts       |   97.77 |    84.21 |     100 |   97.72 | 162,262                           
+ sensorSimulator.ts |       0 |        0 |       0 |       0 | 1-392                             
+ simulationLoop.ts  |   88.88 |    55.55 |    87.5 |   88.57 | 31,53,58,71                       
+ types.ts           |      75 |      100 |       0 |      75 | 67                                
+ virtualClock.ts    |   83.33 |     86.2 |   66.66 |   83.33 | 69,78,110,118-122,141             
+ zoneGenerator.ts   |    98.3 |    88.88 |     100 |   98.14 | 171                               
+--------------------|---------|----------|---------|---------|-----------------------------------
+
+Test Suites: 6 passed, 6 total
+Tests:       108 passed, 108 total
+Time:        53.448 s
+
+================================================================
+services/stream-processor
+================================================================
+----------------------|---------|----------|---------|---------|-------------------
+File                  | % Stmts | % Branch | % Funcs | % Lines | Uncovered Line #s 
+----------------------|---------|----------|---------|---------|-------------------
+All files             |   37.07 |    43.18 |   38.33 |   37.06 |                   
+ kafkaConsumer.ts     |       0 |        0 |       0 |       0 | 1-128             
+ kafkaProducer.ts     |       0 |        0 |       0 |       0 | 1-76              
+ logger.ts            |       0 |        0 |     100 |       0 | 1-3               
+ metrics.ts           |       0 |      100 |     100 |       0 | 1-47              
+ redisClient.ts       |       0 |        0 |       0 |       0 | 1-85              
+ redisWriter.ts       |   77.77 |    33.33 |   83.33 |   77.77 | 117-118,166-172   
+ stateMachine.ts      |   93.02 |    94.73 |     100 |   93.02 | 96-97,115         
+ streamProcessor.ts   |       0 |        0 |       0 |       0 | 2-367             
+ timeWindowManager.ts |     100 |      100 |     100 |     100 |                   
+ zoneStateStore.ts    |   93.75 |    83.33 |   72.72 |   93.33 | 92,105-109        
+----------------------|---------|----------|---------|---------|-------------------
+
+Test Suites: 4 passed, 4 total
+Tests:       50 passed, 50 total
+Time:        8.795 s
+
+================================================================
+services/alert-processor
+================================================================
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+--------------------|---------|----------|---------|---------|-------------------
+File                | % Stmts | % Branch | % Funcs | % Lines | Uncovered Line #s 
+--------------------|---------|----------|---------|---------|-------------------
+All files           |   46.87 |       50 |   22.85 |   49.43 |                   
+ alertProcessor.ts  |     100 |      100 |     100 |     100 |                   
+ deadLetter.ts      |   17.64 |    33.33 |       0 |      20 | 38-64             
+ kafkaConsumer.ts   |   19.56 |     12.5 |       0 |   21.42 | 25-117            
+ logger.ts          |     100 |       50 |     100 |     100 | 4                 
+ messageRecovery.ts |   90.62 |    86.66 |      60 |   96.42 | 45                
+ metrics.ts         |     100 |      100 |     100 |     100 |                   
+ postgresClient.ts  |   18.75 |    76.92 |   16.66 |      20 | 39-100            
+ redisClient.ts     |       0 |        0 |       0 |       0 | 1-53              
+--------------------|---------|----------|---------|---------|-------------------
+
+Test Suites: 1 skipped, 2 passed, 2 of 3 total
+Tests:       2 skipped, 13 passed, 15 total
+Time:        6.765 s, estimated 24 s
+
+================================================================
+services/api
+================================================================
+--------------------|---------|----------|---------|---------|-------------------
+File                | % Stmts | % Branch | % Funcs | % Lines | Uncovered Line #s 
+--------------------|---------|----------|---------|---------|-------------------
+All files           |   18.91 |    23.61 |    22.5 |    17.7 |                   
+ src                |   38.53 |    38.63 |   39.13 |   36.27 |                   
+ src/routes         |       0 |        0 |       0 |       0 |                   
+--------------------|---------|----------|---------|---------|-------------------
+Test Suites: 1 passed, 1 total
+Tests:       9 passed, 9 total
+Time:        7.816 s
+
+================================================================
+services/correlation-engine
+================================================================
+{"level":50,"time":"2026-09-18T02:53:43.677Z","service":"correlation-engine","error":{},"pending":1,"msg":"Failed to dispatch incident events; holding them for the next attempt"}
+{"level":50,"time":"2026-09-18T02:53:43.946Z","service":"correlation-engine","error":{},"pending":1,"msg":"Failed to dispatch incident events; holding them for the next attempt"}
+{"level":50,"time":"2026-09-18T02:53:43.950Z","service":"correlation-engine","error":{},"pending":1,"msg":"Failed to dispatch incident events; holding them for the next attempt"}
+{"level":50,"time":"2026-09-18T02:53:43.958Z","service":"correlation-engine","error":{},"pending":2,"msg":"Failed to dispatch incident events; holding them for the next attempt"}
+{"level":50,"time":"2026-09-18T02:53:43.962Z","service":"correlation-engine","error":{},"pending":2,"msg":"Failed to dispatch incident events; holding them for the next attempt"}
+{"level":30,"time":"2026-09-18T02:53:44.079Z","service":"correlation-engine","broker":"localhost:9092","topic":"zone.incidents","msg":"Incident producer connected"}
+{"level":30,"time":"2026-09-18T02:53:44.047Z","service":"correlation-engine","registered":3,"placed":3,"occupiedCells":1,"recomputedCells":0,"geometry":{"resolution":5,"ringSize":1},"msg":"Zone registry loaded"}
+{"level":30,"time":"2026-09-18T02:53:44.165Z","service":"correlation-engine","broker":"localhost:9092","topic":"zone.incidents","msg":"Incident producer connected"}
+{"level":30,"time":"2026-09-18T02:53:44.167Z","service":"correlation-engine","broker":"localhost:9092","topic":"zone.incidents","msg":"Incident producer connected"}
+{"level":30,"time":"2026-09-18T02:53:44.199Z","service":"correlation-engine","broker":"localhost:9092","topic":"zone.incidents","msg":"Incident producer connected"}
+{"level":30,"time":"2026-09-18T02:53:44.199Z","service":"correlation-engine","msg":"Incident producer disconnected"}
+{"level":30,"time":"2026-09-18T02:53:44.201Z","service":"correlation-engine","broker":"localhost:9092","topic":"zone.incidents","msg":"Incident producer connected"}
+{"level":30,"time":"2026-09-18T02:53:44.205Z","service":"correlation-engine","broker":"localhost:9092","topic":"zone.degradations","groupId":"correlation-engine","fromBeginning":true,"msg":"Degradation consumer connected"}
+{"level":30,"time":"2026-09-18T02:53:44.209Z","service":"correlation-engine","broker":"localhost:9092","topic":"zone.degradations","groupId":"correlation-engine","fromBeginning":true,"msg":"Degradation consumer connected"}
+{"level":30,"time":"2026-09-18T02:53:44.210Z","service":"correlation-engine","maxBatchSize":500,"msg":"Correlation consumer started"}
+{"level":30,"time":"2026-09-18T02:53:44.212Z","service":"correlation-engine","broker":"localhost:9092","topic":"zone.degradations","groupId":"correlation-engine","fromBeginning":true,"msg":"Degradation consumer connected"}
+{"level":30,"time":"2026-09-18T02:53:44.212Z","service":"correlation-engine","maxBatchSize":500,"msg":"Correlation consumer started"}
+{"level":30,"time":"2026-09-18T02:53:44.215Z","service":"correlation-engine","broker":"localhost:9092","topic":"zone.degradations","groupId":"correlation-engine","fromBeginning":true,"msg":"Degradation consumer connected"}
+{"level":30,"time":"2026-09-18T02:53:44.215Z","service":"correlation-engine","msg":"Degradation consumer disconnected"}
+{"level":40,"time":"2026-09-18T02:53:44.167Z","service":"correlation-engine","registryKey":"zones:registry","msg":"Zone registry is empty; the graph will fill from degradation messages as they arrive"}
+{"level":30,"time":"2026-09-18T02:53:44.170Z","service":"correlation-engine","registered":2,"placed":1,"occupiedCells":1,"recomputedCells":0,"geometry":{"resolution":5,"ringSize":1},"msg":"Zone registry loaded"}
+{"level":40,"time":"2026-09-18T02:53:44.172Z","service":"correlation-engine","zoneId":"Z-bad","latitude":"north","longitude":"","msg":"Registry entry has unusable coordinates; skipping"}
+{"level":30,"time":"2026-09-18T02:53:44.173Z","service":"correlation-engine","registered":2,"placed":1,"occupiedCells":1,"recomputedCells":0,"geometry":{"resolution":5,"ringSize":1},"msg":"Zone registry loaded"}
+{"level":30,"time":"2026-09-18T02:53:44.176Z","service":"correlation-engine","registered":1,"placed":1,"occupiedCells":1,"recomputedCells":0,"geometry":{"resolution":5,"ringSize":1},"msg":"Zone registry loaded"}
+{"level":30,"time":"2026-09-18T02:53:44.176Z","service":"correlation-engine","registered":1,"placed":1,"occupiedCells":1,"recomputedCells":0,"geometry":{"resolution":5,"ringSize":1},"msg":"Zone registry loaded"}
+{"level":30,"time":"2026-09-18T02:53:44.180Z","service":"correlation-engine","registered":1,"placed":1,"occupiedCells":1,"recomputedCells":0,"geometry":{"resolution":5,"ringSize":1},"msg":"Zone registry loaded"}
+{"level":30,"time":"2026-09-18T02:53:44.181Z","service":"correlation-engine","discovered":1,"zones":2,"msg":"Zone registry refreshed"}
+{"level":30,"time":"2026-09-18T02:53:44.184Z","service":"correlation-engine","registered":1,"placed":1,"occupiedCells":1,"recomputedCells":0,"geometry":{"resolution":5,"ringSize":1},"msg":"Zone registry loaded"}
+{"level":40,"time":"2026-09-18T02:53:44.186Z","service":"correlation-engine","registryKey":"zones:registry","msg":"Zone registry is empty; the graph will fill from degradation messages as they arrive"}
+{"level":40,"time":"2026-09-18T02:53:44.192Z","service":"correlation-engine","zoneId":"Z-9","from":"854240d3fffffff","to":"8520c2cffffffff","msg":"Zone moved to a different H3 cell"}
+{"level":30,"time":"2026-09-18T02:53:44.199Z","service":"correlation-engine","registered":1,"placed":1,"occupiedCells":1,"recomputedCells":0,"geometry":{"resolution":5,"ringSize":1},"msg":"Zone registry loaded"}
+{"level":30,"time":"2026-09-18T02:53:44.204Z","service":"correlation-engine","registered":1,"placed":1,"occupiedCells":1,"recomputedCells":0,"geometry":{"resolution":5,"ringSize":1},"msg":"Zone registry loaded"}
+{"level":30,"time":"2026-09-18T02:53:44.204Z","service":"correlation-engine","intervalMs":1000,"msg":"Zone registry background refresh started"}
+{"level":30,"time":"2026-09-18T02:53:45.204Z","service":"correlation-engine","discovered":1,"zones":2,"msg":"Zone registry refreshed"}
+{"level":30,"time":"2026-09-18T02:53:44.215Z","service":"correlation-engine","intervalMs":1000,"msg":"Zone registry background refresh started"}
+{"level":50,"time":"2026-09-18T02:53:45.215Z","service":"correlation-engine","error":{},"msg":"Zone registry refresh failed; will retry on the next interval"}
+{"level":50,"time":"2026-09-18T02:53:46.215Z","service":"correlation-engine","error":{},"msg":"Zone registry refresh failed; will retry on the next interval"}
+{"level":30,"time":"2026-09-18T02:53:44.222Z","service":"correlation-engine","intervalMs":1000,"msg":"Zone registry background refresh started"}
+{"level":50,"time":"2026-09-18T02:53:44.873Z","service":"correlation-engine","error":{},"topic":"zone.degradations","partition":3,"offset":"101","msg":"Degradation is not valid JSON; skipping its offset"}
+{"level":40,"time":"2026-09-18T02:53:44.970Z","service":"correlation-engine","reason":"missing-position","message":{"zoneId":"Z-bad","h3Cell":"cell-Z-bad","h3CoarseCell":"coarse-a","latitude":null,"longitude":70,"previousState":"NORMAL","currentState":"STRESSED","severity":0.8,"avg1m":0.8,"avg5m":0.78,"eventTime":1768478400000},"msg":"Skipping unusable degradation"}
+{"level":40,"time":"2026-09-18T02:53:44.977Z","service":"correlation-engine","reason":"missing-zone-id","message":{"zoneId":"","h3Cell":"cell-Z-4","h3CoarseCell":"coarse-a","latitude":30.04,"longitude":70.04,"previousState":"NORMAL","currentState":"STRESSED","severity":0.8,"avg1m":0.8,"avg5m":0.78,"eventTime":1768478401000},"msg":"Skipping unusable degradation"}
+{"level":40,"time":"2026-09-18T02:53:45.040Z","service":"correlation-engine","incidentId":"INC-0123456789abcdef","eventType":"SHRANK","msg":"Live incident has no members; skipping its geo entry"}
+
+incident lifecycle property summary
+
+differential fuzz summary
+---------------------------|---------|----------|---------|---------|-------------------
+File                       | % Stmts | % Branch | % Funcs | % Lines | Uncovered Line #s 
+---------------------------|---------|----------|---------|---------|-------------------
+All files                  |   97.09 |    96.47 |   93.79 |   97.22 |                   
+ src                       |   94.31 |    94.01 |   89.23 |   94.58 |                   
+ src/core                  |     100 |    99.31 |    97.5 |     100 |                   
+---------------------------|---------|----------|---------|---------|-------------------
+
+Test Suites: 16 passed, 16 total
+Tests:       267 passed, 267 total
+Time:        25.698 s
+
