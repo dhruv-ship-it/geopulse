@@ -126,13 +126,27 @@ Euler-tour trees at O(log² n) amortised, which I rejected as more implementatio
 my scale justifies. It's in ADR-002.
 
 **Q5. How do you know the optimised version is correct?**
-Differential testing. I kept the naive full-recompute implementation as an oracle and fuzz both
-with the same randomised event sequences — ten thousand of them — asserting the component
-partitions are identical. Plus property-based tests for invariants: every active zone is in exactly
-one component; two zones share a component iff a path of active adjacent zones connects them;
-replaying an identical event sequence produces byte-identical output.
-That is stronger evidence than unit tests, because unit tests only check cases I thought of and
-the fuzzer explores cases I didn't.
+Differential testing against an oracle. I kept the naive full-recompute implementation — it is not
+dead code, it is the reference — and drive both through one shared window with an identical call
+sequence, comparing the component partitions **after every single operation**, not just at the end.
+Measured: **11,000 sequences, 551,871 operations, 551,871 partition comparisons, zero
+divergences.** Seed is pinned, so it reproduces exactly on any machine.
+
+**Then the part that actually makes that number mean something.** A fuzz test that never generates
+the hard cases passes trivially while testing nothing — so I measure what the generator reached
+and assert on it. That run hit **7,732 component splits, 110,754 expirations, 5,305 full teardowns,
+largest component 28.** Splits are the case the whole design turns on: union-find cannot delete, so
+a member expiring mid-component is exactly where a wrong implementation diverges. Without that
+second assertion, "zero divergences over 11,000 sequences" could mean the optimised path was never
+put under stress.
+
+Plus property tests for the invariants: every active zone in exactly one component; two zones share
+a component iff a path of active adjacent zones connects them; replay of an identical sequence is
+byte-identical. And 1,000 of those sequences run over the **real H3 neighbour graph** rather than a
+synthetic one, with a guard that the generated field is neither fully disconnected nor a single
+blob — both of which would make the comparison vacuous.
+
+That is stronger evidence than unit tests, because unit tests only check the cases I thought of.
 
 **Q6. Two incidents merge. What happens to the IDs you already published?**
 The survivor is the incident with the earlier `openedAt`, ties broken lexicographically on ID — so
