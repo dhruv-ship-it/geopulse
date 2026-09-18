@@ -1,13 +1,22 @@
-import { SensorEvent, ZoneStateData, StateTransitionAlert, ZoneState } from './types';
+import { SensorEvent, ZoneStateData, StateTransitionAlert, ZoneDegradation } from './types';
 import { TimeWindowManager } from './timeWindowManager';
 import { StateMachine } from './stateMachine';
 import { KafkaEventConsumer } from './kafkaConsumer';
 import { RedisClient } from './redisClient';
 import { RedisWriter } from './redisWriter';
-import { KafkaAlertProducer, ZoneAlert } from './kafkaProducer';
+import { KafkaDegradationProducer } from './kafkaProducer';
+import { severityOf } from './severity';
 import { ZoneStateStore } from './zoneStateStore';
 import { logger } from './logger';
-import { sensorEventsProcessedTotal, stateTransitionsTotal, alertsPublishedTotal, alertPublishLatencyMs, zonesTrackedGauge, zonesEvictedTotal } from './metrics';
+import {
+  degradationPublishLatencyMs,
+  degradationsDeadLetteredTotal,
+  degradationsPublishedTotal,
+  sensorEventsProcessedTotal,
+  stateTransitionsTotal,
+  zonesEvictedTotal,
+  zonesTrackedGauge
+} from './metrics';
 
 /**
  * Main stream processor that consumes events and derives operational states
@@ -17,17 +26,21 @@ export class StreamProcessor {
   private consumer: KafkaEventConsumer;
   private redisClient: RedisClient;
   private redisWriter?: RedisWriter;
-  private alertProducer?: KafkaAlertProducer;
+  private degradationProducer?: KafkaDegradationProducer;
   private zones: ZoneStateStore = new ZoneStateStore();
   private eventCounter: number = 0;
   private transitionCounter: number = 0;
+  private degradationCounter: number = 0;
+  private recoveryCounter: number = 0;
+  /** Producer dead-letter tally already mirrored into the metric, so it is not double counted. */
+  private deadLetteredSeen: number = 0;
   private startTime: number = 0;
   private isRunning: boolean = false;
 
   constructor() {
     this.consumer = new KafkaEventConsumer();
     this.redisClient = new RedisClient();
-    // Note: alertProducer is initialized in initialize() to avoid async work in constructor
+    // Note: the producers are initialized in initialize() to avoid async work in a constructor
   }
 
   /**
@@ -39,9 +52,9 @@ export class StreamProcessor {
     // Connect to Kafka
     await this.consumer.connect();
 
-    // Initialize alert producer and connect
-    this.alertProducer = new KafkaAlertProducer();
-    await this.alertProducer.connect();
+    // Brings up its own dead letter producer on the same connection. See KafkaDegradationProducer.
+    this.degradationProducer = new KafkaDegradationProducer();
+    await this.degradationProducer.connect();
     
     // Connect to Redis
     await this.redisClient.connect();
@@ -92,8 +105,8 @@ export class StreamProcessor {
     this.isRunning = false;
     
     await this.consumer.disconnect();
-    if (this.alertProducer) {
-      await this.alertProducer.disconnect();
+    if (this.degradationProducer) {
+      await this.degradationProducer.disconnect();
     }
     await this.redisClient.disconnect();
     
@@ -106,6 +119,10 @@ export class StreamProcessor {
         duration,
         totalEvents: this.eventCounter,
         stateTransitions: this.transitionCounter,
+        consumer: this.consumer.stats(),
+        producer: this.degradationProducer?.stats(),
+        degradationsPublished: this.degradationCounter,
+        recoveriesPublished: this.recoveryCounter,
         averageRate: rate,
         zonesTracked: this.zones.size,
         zonesEvicted: this.zones.evicted,
@@ -205,31 +222,45 @@ export class StreamProcessor {
       zoneState.lastAlertTimestamp,
       event.eventTimestamp
     )) {
-      // Create alert object matching strict Phase 4 schema
-      const alert: ZoneAlert = {
+      // Every transition is published, including the ones back down. A transition to NORMAL is
+      // a *recovery*, and the correlation engine needs it: without it, a zone stays an incident
+      // member until its correlation window expires, so an incident is reported over ground that
+      // recovered up to CORRELATION_WINDOW_MS ago. Recoveries are also what let an incident
+      // shrink and close on the evidence rather than on a timeout.
+      const degradation: ZoneDegradation = {
         zoneId: event.zoneId,
+        h3Cell: entry.cells.h3Cell,
+        h3CoarseCell: entry.cells.h3CoarseCell,
+        latitude: entry.coordinates.latitude,
+        longitude: entry.coordinates.longitude,
         previousState,
         currentState: nextState,
+        severity: severityOf(avg1m, avg5m),
         avg1m,
         avg5m,
-        timestamp: event.eventTimestamp
+        // Event time, from the event. Not Date.now(), and not the Kafka record timestamp —
+        // ADR-007, and the 5.76M messages D10 cost.
+        eventTime: event.eventTimestamp
       };
 
-      // Publish to Kafka (zone.alerts) — only on actual state transitions
-      try {
-        if (this.alertProducer) {
-          const start = Date.now();
-          await this.alertProducer.sendAlert(alert);
-          
-          // Observe latency and increment counter
-          alertPublishLatencyMs.observe(Date.now() - start);
-          alertsPublishedTotal.inc();
-          
-          logger.info({ zoneId: alert.zoneId, previousState: alert.previousState, currentState: alert.currentState }, 'Published alert to Kafka');
+      // Publishes, or retries, or dead-letters, or throws — see KafkaDegradationProducer.
+      // Deliberately not wrapped in try/catch here: a throw from this line must reach
+      // eachMessage so the offset is not committed. That is defect D1.
+      if (this.degradationProducer) {
+        const start = Date.now();
+        await this.degradationProducer.publish(degradation);
+        degradationPublishLatencyMs.observe(Date.now() - start);
+
+        const recovery = nextState === 'NORMAL';
+        degradationsPublishedTotal.labels(recovery ? 'recovery' : 'degradation').inc();
+        if (recovery) {
+          this.recoveryCounter++;
+        } else {
+          this.degradationCounter++;
         }
-      } catch (err) {
-        logger.error({ error: err }, 'Failed to publish alert to Kafka');
-        // Per Phase 4 rules: do not add retries or alter state machine behavior
+        const producerStats = this.degradationProducer.stats();
+        degradationsDeadLetteredTotal.inc(producerStats.deadLettered - this.deadLetteredSeen);
+        this.deadLetteredSeen = producerStats.deadLettered;
       }
 
       // Emit local log alert (unchanged behavior)

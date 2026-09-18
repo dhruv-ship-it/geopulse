@@ -100,3 +100,92 @@ the answer is: the offset is the commit point, so anything that makes the handle
 normally is a commit; a DLQ is how you stop a poison pill blocking a partition without lying
 about durability; and the DLQ being unavailable has to fall back to not committing, or you have
 just moved the data loss one layer out.
+
+---
+
+# Amendment (WP3, S7) — the same bug in `stream-processor`, and why it gets the opposite answer
+
+## Status
+
+Accepted. Amends, does not supersede: everything above still holds for `alert-processor`.
+
+## Context
+
+D1 was fixed in `alert-processor` and left in place in `stream-processor`, whose `eachMessage`
+had the identical shape — try/catch, log, return — and therefore the identical consequence: a
+failed Redis write or a failed publish committed the offset and destroyed the event.
+
+Fixing it raised a question the original ADR did not have to answer, because it only ever looked
+at one topic. `stream-processor` consumes `raw.zone.events`, and a raw sensor event is not the
+same kind of thing as an alert. Applying the retry-then-DLQ rule to it unexamined would have been
+consistency for its own sake.
+
+## Decision
+
+**One implementation, two policies.** `processWithRecovery` moves into
+`@geopulse/kafka-recovery` and gains a required `onFailure` argument with no default:
+
+| Consumer | Topic | Policy | Because |
+|---|---|---|---|
+| `alert-processor` | `zone.degradations` | `'dead-letter'` | a degradation is a **derived fact**; nothing re-emits it |
+| `stream-processor` | `raw.zone.events` | `'drop'` | a sensor event is **one sample** of a signal re-sampled every second |
+
+The argument is required rather than defaulted so that every call site states its own answer.
+A default would mean the cheaper policy could be inherited by accident somewhere it costs a
+durable fact — which is the failure mode this whole ADR exists to prevent, one level up.
+
+### Why dropping a sensor event is not a re-run of D1
+
+`avg1m` is a mean over roughly sixty samples and `avg5m` over three hundred. Losing one moves
+`avg1m` by at most 1/60 of its range, for at most sixty seconds, after which the sample has left
+the window and the loss has no representation anywhere in the system. The *state* a zone is in is
+derived from the averages, never from any individual event, so the transition this pipeline
+exists to detect still fires — at worst one sample late, which is two orders of magnitude inside
+the 60-second confirmation delay the state machine already imposes.
+
+The DLQ side does not survive contact with the volume either. At 400 zones sampling once a second
+a sustained downstream failure writes 400 dead letters per second onto a single-partition,
+14-day-retention topic sized for the occasional poison message. And nobody would replay them:
+feeding an hour-old sensor reading back into a five-minute event-time window does not repair the
+window, it corrupts it.
+
+What makes this a considered trade rather than D1 again is that a drop is **counted and logged**:
+`sensor_events_dropped_total{reason}` is on the metrics endpoint, so a non-zero rate is a number
+somebody can alert on rather than something inferred from the absence of alerts. That inference
+is exactly how D10 stayed hidden for a week.
+
+### The producing side gets the expensive policy
+
+The same service publishes `ZoneDegradation` to `zone.degradations`, and that message is a fact,
+not a sample: the state machine has already advanced past the transition and will not fire it
+again while the condition holds. `KafkaDegradationProducer.publish` therefore does bounded retry
+(`retryWithBackoff`, split out of `processWithRecovery` for callers that have no offset to
+withhold) and then dead-letters — the same rule as the consuming side, applied to a producer.
+
+Two sub-decisions inside that are worth stating:
+
+**The state advance is not rolled back on a publish failure.** The tempting alternative is to
+leave `currentState` alone so the next event re-derives the transition. It does not work:
+`StateMachine` clears its confirmation timer when a transition fires, so declining to commit
+re-arms a 60-second confirmation and the fault is reported a minute late. That trades a loud DLQ
+entry for a quiet latency regression, and a silent one-minute detection delay is exactly the kind
+of thing that survives into a benchmark and makes a measured number wrong.
+
+**If the DLQ is unreachable too, the publish throws**, which travels out of `eachMessage` and
+stops the offset — the original ADR's last rule, unchanged. The consequence here is specific: the
+raw sensor event is redelivered and its sample is counted twice in its window. One duplicate
+among sixty, on a path that only runs when Kafka is entirely unavailable, is the right price for
+not losing the fact.
+
+## Consequences
+
+- `stream-processor` can now lose raw sensor events. It could always lose them; the difference is
+  that it now says so, with a number.
+- The two policies must not drift into one. The required argument is the mechanism; there is no
+  default to fall into.
+- A redelivery double-counts a sample in its window. Bounded, failure-path-only, and it does not
+  affect replay determinism, because a clean replay has no redeliveries.
+- `zone.degradations.dlq` now receives dead letters from both sides of the topic — the producer
+  that could not publish and the consumer that could not persist. The `x-source-partition: -1`
+  and `x-source-offset: unpublished` headers are what tell them apart; a replay tool must not
+  assume a dead letter came from a partition.

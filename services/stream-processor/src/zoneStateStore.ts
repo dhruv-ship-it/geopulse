@@ -1,8 +1,21 @@
+import { ZoneCells, cellsFor } from '@geopulse/spatial';
+
 import { ZoneStateData } from './types';
 
 export interface ZoneEntry {
   state: ZoneStateData;
   coordinates: { latitude: number; longitude: number };
+  /**
+   * The zone's H3 cells, computed once on first sight and kept.
+   *
+   * Cached rather than recomputed per event because every degradation message carries them and
+   * `cellsFor` is two `latLngToCell` calls plus a `cellToParent`. At 400 zones sampling once a
+   * second that is 1200 H3 calls per second to answer a question whose inputs never change —
+   * a zone's coordinates are fixed for the life of the zone in this system. The coarse cell in
+   * particular is the Kafka partition key (ADR-004), so it is read on the hot path for every
+   * transition.
+   */
+  cells: ZoneCells;
   /** Event-time of the most recent event for this zone. */
   lastEventTime: number;
   /** Whether this zone has been written to the Redis zone registry yet. */
@@ -129,6 +142,7 @@ export class ZoneStateStore {
       entry = {
         state: createState(),
         coordinates: { latitude, longitude },
+        cells: cellsFor(latitude, longitude),
         lastEventTime: eventTime,
         registered: false
       };

@@ -19,8 +19,9 @@
   ],
   "author": "GeoPulse Team",
   "license": "MIT",
-  "description": "GeoPulse Stream Processor - Derives operational states from sensor events using time-based windows and state machines",
+  "description": "GeoPulse Stream Processor - derives per-zone degradation state from sensor events and publishes it to zone.degradations",
   "dependencies": {
+    "@geopulse/kafka-recovery": "file:../../packages/kafka-recovery",
     "@geopulse/spatial": "file:../../packages/spatial",
     "@types/node": "^25.2.0",
     "@types/redis": "^4.0.10",
