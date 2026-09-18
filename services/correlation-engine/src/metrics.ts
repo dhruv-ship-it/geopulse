@@ -114,9 +114,19 @@ export const incidentEventsPublishedTotal = new Counter({
 });
 
 /**
- * The evidence for choosing `eachBatch` over `eachMessage`. The README claims a regional event
- * arrives as a burst and that batching therefore consolidates it; if this histogram sits at 1
- * during a storm, the claim is false and the complexity is not being paid for.
+ * The metric that changed a design decision, and the reason this file is full of comments like
+ * this one.
+ *
+ * It was added to falsify a claim: the README argued that a regional event arrives as a burst and
+ * that `eachBatch` therefore consolidates it, and this histogram was the check — *if it sits at 1
+ * during a storm, the claim is false and the complexity is not being paid for.*
+ *
+ * It sat at 1. The first end-to-end run measured 70 messages across 68 batches, because
+ * degradations are rare and the pipeline keeps up. Reconciling per batch had quietly become
+ * reconciling per message exactly when the system was healthy. The lifecycle now reconciles on an
+ * event-time grid instead (ADR-004 amendment), which consolidates the same way whether the
+ * consumer is caught up or behind — and this histogram stays, because it is still the honest
+ * answer to "how much does a batch actually contain".
  */
 export const degradationBatchSize = new Histogram({
   name: 'degradation_batch_size',
@@ -201,3 +211,30 @@ export const incidentPublishLatencyMs = new Histogram({
 
 // Export registry
 export { register };
+
+/**
+ * Reconcile boundaries crossed, and boundaries the fast-forward skipped.
+ *
+ * The grid reconciles at every multiple of `RECONCILE_TICK_MS` a batch spans, which over a quiet
+ * four-hour replay would be 2,880 reconciles of an empty window. When the window is empty *and*
+ * no incident is live, a reconcile is provably a no-op and the grid jumps straight to the
+ * boundary before the next message.
+ *
+ * Both halves are counted because an optimisation whose whole claim is "this has no observable
+ * effect" should be the one thing in the system you can observe. A `skipped` count that climbs
+ * while incidents are open would mean the precondition is wrong and lifecycle events are being
+ * silently dropped.
+ */
+export const reconcileTicksTotal = new Counter({
+  name: 'reconcile_ticks_total',
+  help: 'Event-time grid boundaries actually reconciled',
+  labelNames: [],
+  registers: [register]
+});
+
+export const reconcileTicksSkippedTotal = new Counter({
+  name: 'reconcile_ticks_skipped_total',
+  help: 'Grid boundaries skipped by the empty-state fast-forward',
+  labelNames: [],
+  registers: [register]
+});

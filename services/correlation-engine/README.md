@@ -212,10 +212,19 @@ Two of those deserve a note:
   fixed historical epoch, so it would report about 245 days. Wall-clock cost is
   `compaction_duration_ms` and the broker's consumer lag.
 
-Beyond the spec list, each metric names the claim it exists to falsify — `degradation_batch_size`
-is the evidence for the `eachBatch` decision above, and `connectivity_rebuilds` /
-`connectivity_rebuilt_members` / `connectivity_max_rank` keep ADR-002's "components are small"
-assumption measurable rather than asserted.
+Beyond the spec list, each metric names the claim it exists to falsify, and one of them has
+already collected: **`degradation_batch_size`** was added to check the `eachBatch` argument — *if
+it sits at 1 during a storm, the claim is false and the complexity is not being paid for.* It sat
+at 1. The first end-to-end run measured 70 messages across 68 batches, and the lifecycle moved off
+per-batch reconciling onto the event-time grid described above. The histogram stays, because "how
+much does a batch actually contain" is still worth knowing.
+
+`reconcile_ticks_total` and `reconcile_ticks_skipped_total` cover the grid itself. The
+fast-forward's whole claim is that skipping a boundary over an empty window with no live incidents
+has no observable effect, so it is the one thing that should be observable: a skipped count that
+climbs while incidents are open means the precondition is wrong and lifecycle events are being
+dropped. `connectivity_rebuilds` / `connectivity_rebuilt_members` / `connectivity_max_rank` keep
+ADR-002's "components are small" assumption measurable rather than asserted.
 
 `GET :9093/health` reports what the engine *believes* — watermark, members, incidents, batches —
 rather than just `200 ok`. An engine connected to everything and consuming nothing passes every

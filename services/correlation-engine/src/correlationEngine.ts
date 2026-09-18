@@ -19,6 +19,8 @@ import {
   degradationsConsumedTotal,
   degradationsRejectedTotal,
   degradationsStaleTotal,
+  reconcileTicksSkippedTotal,
+  reconcileTicksTotal,
   incidentMemberCount,
   incidentsClosedTotal,
   incidentsMergedTotal,
@@ -350,7 +352,9 @@ export class CorrelationEngine {
       if (this.window.size === 0 && this.lifecycle.size === 0) {
         const target = Math.floor(limit / this.reconcileTickMs) * this.reconcileTickMs;
         if (target > this.pendingTickAt) {
-          this.ticksSkipped += (target - this.pendingTickAt) / this.reconcileTickMs;
+          const skipped = (target - this.pendingTickAt) / this.reconcileTickMs;
+          this.ticksSkipped += skipped;
+          reconcileTicksSkippedTotal.inc(skipped);
           this.pendingTickAt = target;
         }
       }
@@ -380,6 +384,7 @@ export class CorrelationEngine {
     compactionDurationMs.observe(Date.now() - startedAt);
     this.foldedSinceTick = false;
     this.ticks++;
+    reconcileTicksTotal.inc();
   }
 
   private toWire(events: readonly IncidentEvent[]): IncidentWireEvent[] {
