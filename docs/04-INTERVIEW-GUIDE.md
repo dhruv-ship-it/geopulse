@@ -155,9 +155,42 @@ the outcome is deterministic and replay-stable. I emit a `MERGED` event on the s
 consumers must treat incident identity as mergeable — the contract is documented, and it's the
 same class of problem as stream-stream joins or CRDT merges.
 *(Follow-up you should expect: "and what if the bridging zone then expires and it splits again?"
-→ largest surviving fragment keeps the ID, other fragments open fresh incidents. It's a judgement
-call: I optimised for on-call continuity — the person already looking at that incident ID should
-keep seeing the biggest part of the problem — rather than set-theoretic purity. ADR-003.)*
+→ the keeper is the fragment that **inherited the most of the incident's members**, ties on total
+size, then canonical order. Deliberately not raw size: a fragment can be large because unrelated
+zones joined it in the same batch, and ranking on that hands the ID to the half that inherited
+least. It's a judgement call optimised for on-call continuity — the person already looking at that
+ID should keep seeing the biggest part of *their* problem — rather than set-theoretic purity.
+ADR-003.)*
+
+**The lifecycle has three statuses, not two, and the third one is forced.** Closing needs a grace
+period below the minimum member count, but the invariant is that no OPEN incident is ever below
+that minimum. Both cannot hold with only OPEN and CLOSED — during the grace period the incident is
+below the minimum and not yet closed. `DRAINING` is that state; an incident that regrows during it
+returns to OPEN. I found this because the property test asserting the invariant failed against my
+own spec.
+
+**Q6a. How are incident IDs generated, and how do you know they're unique?**
+*(Ask yourself this one — it is where the best bug in the project lives.)*
+
+`SHA-256("geopulse-incident-v1" | openedAt | sorted seed members)`, first 64 bits, `INC-` prefixed.
+A hash rather than a UUID or a counter because it has to be **stable across replays** — same input
+stream, same IDs, which is what makes the whole thing diffable and testable.
+
+My first uniqueness argument was: the preimage contains `openedAt`, components are disjoint at any
+instant, and event time is a monotonic watermark — therefore no two incidents can share a preimage.
+
+**That argument is wrong, and a property test found it.** Monotonic is not *strictly* increasing. A
+zone that recovers and re-degrades inside the same millisecond closes an incident and opens an
+identical one at an unchanged watermark — same members, same `openedAt`, same ID minted twice. At
+`minZones: 1` that is a single pair of messages. fast-check shrank the failing case to 30 events.
+
+The fix retains IDs retired at the current watermark instant and disambiguates against them,
+pruning as soon as event time moves past. It holds one instant's closures, not a growing graveyard.
+The remaining collision route is a genuine 64-bit SHA-256 birthday collision, which at realistic
+incident volumes is negligible — and handled by the same disambiguation loop anyway.
+
+Both the broken argument and the corrected one are in ADR-003, because the reasoning is the
+interesting part, not the code.
 
 **Q7. What happens when the correlation engine crashes?**
 Right now, honestly: in-memory state is lost, and on restart it rebuilds from the correlation
