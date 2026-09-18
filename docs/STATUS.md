@@ -10,10 +10,10 @@
 | Field | Value |
 |---|---|
 | **Phase** | Phase 1 — Spatiotemporal Incident Correlation |
-| **Active work package** | S4 done — **WP2a complete** (`CorrelationWindow`, `TimeAwareConnectivity`, the naive oracle, the differential fuzz). **WP2b is next**: `IncidentLifecycle`. WP6b still waits on WP3. |
+| **Active work package** | S5 done — **WP2 complete** (WP2a: window + connectivity + oracle + differential fuzz; WP2b: `IncidentLifecycle`, deterministic ids, merge/split policy, property tests). **WP3 is next**: wire the core into a real service. WP6b still waits on WP3. |
 | **Last updated** | 2026-09-18 |
-| **Last commit at time of writing** | `2f843c5` |
-| **Blocked on** | **Nothing.** The correlation core is in place and proven against its oracle; WP2b builds incidents on top of the component partition it produces. |
+| **Last commit at time of writing** | `a5276db` |
+| **Blocked on** | **Nothing.** The correlation core is complete: a partition proven against its oracle, and incidents proven against their invariants. WP3 puts Kafka, Redis and Postgres around it. |
 
 **Decisions locked in (do not re-litigate without the owner):**
 - Scope is idea ① (spatial correlation) only. Ideas ②–⑤ are deferred to `06-FUTURE-PHASES.md`.
@@ -31,8 +31,8 @@
 | WP0 | Foundation & defect cleanup | ☑ Done | D1, D2, D4, D5 closed, plus D7. D3 deferred as planned. All four acceptance criteria verified against live Kafka/Redis/Postgres. Understanding checkpoint still owed. |
 | WP1 | Spatial layer (H3 neighbour graph) | ☑ Done | `@geopulse/spatial` — `NeighbourGraph` plus the cells module moved out of stream-processor. All three acceptance criteria met: lookup flat at 0.58→1.03 µs across 1k→100k zones against 39.6→4630.7 µs for a naive scan; antimeridian, polar and pentagon tests; ADR-001. Understanding checkpoint still owed. |
 | WP2a | Correlation core — window + connectivity | ☑ Done | `CorrelationWindow`, `TimeAwareConnectivity` (union-find + local rebuild), `NaiveConnectivity` (the oracle), and the differential fuzz. Acceptance met: **11,000 sequences / 551,871 operations, 0 divergences**. ADR-002. Understanding checkpoint still owed. |
-| WP2b | Correlation core — `IncidentLifecycle` | ☐ Not started | **Next.** OPENED / GREW / MERGED / SHRANK / CLOSED, split policy, deterministic incident ids, property tests, ADR-003. Items 3–5 of `02-PHASE-1-CORRELATION.md` WP2. |
-| WP3 | `correlation-engine` service | ☐ Not started | |
+| WP2b | Correlation core — `IncidentLifecycle` | ☑ Done | OPENED / GREW / MERGED / SHRANK / CLOSED, `DRAINING` as the third status, SHA-256 incident ids, merge by age, split by inheritance. Acceptance met: **2,500 property sequences / 156,773 invariant checks, 0 violations**, and a byte-identical replay over 1,000 of them. 100% statements and branches on the module. ADR-003. Understanding checkpoint still owed. |
+| WP3 | `correlation-engine` service | ☐ Not started | **Next.** |
 | WP4 | Propagation vector | ☐ Not started | |
 | WP5 | API + live map UI | ☐ Not started | |
 | WP6a | Simulator ground truth | ☑ Done | All four scenarios inject, all four emit §2-schema labels, determinism asserted byte-for-byte, labels verified against the real state machine. ADR-006. Understanding checkpoint still owed. |
@@ -54,6 +54,7 @@ truly complete when both are ticked.
 | WP0 | ☐ — questions in `02-PHASE-1-CORRELATION.md` WP0; ADR-000 answers the first two | |
 | WP1 | ☐ — questions at the end of the S3 log entry; ADR-001 answers most of them in prose, so answer closed-book first | |
 | WP2a | ☐ — questions at the end of the S4 log entry; ADR-002 answers several in prose, so answer closed-book first | |
+| WP2b | ☐ — questions at the end of the S5 log entry; ADR-003 answers most of them in prose, so answer closed-book first | |
 | WP3 | ☐ | |
 | WP4 | ☐ | |
 | WP6a | ☐ — questions at the end of the S2b log entry | |
@@ -67,7 +68,7 @@ truly complete when both are ticked.
 | ADR-000 | Delivery semantics for alert persistence, and what happens on failure | ☑ Written (WP0) |
 | ADR-001 | H3 hex cells for adjacency, over geohash, spatial trees and raw distance | ☑ Written (WP1) |
 | ADR-002 | Incremental union-find with local rebuild on expiry | ☑ Written (WP2a) |
-| ADR-003 | Incident identity, merge and split semantics | ☐ Not written (WP2b) |
+| ADR-003 | Incident identity, merge and split semantics | ☑ Written (WP2b) |
 | ADR-004 | Partitioning on coarse H3 cells | ☐ Not written |
 | ADR-005 | Simulated event time: virtual clock, bounded lag, speed multiplier | ☑ Written (S2a) |
 | ADR-006 | Ground truth by construction: one severity function, two thresholds | ☑ Written (S2b) |
@@ -81,12 +82,13 @@ truly complete when both are ticked.
 
 | Metric | Value | Scenario / config | Source file | Date |
 |---|---|---|---|---|
-| Test coverage, correlation-engine | 100% stmts, 98.5% branches | whole src tree, `./benchmarks/run-coverage.sh`; 103 tests | `benchmarks/results/wp2-coverage.txt` | 2026-09-18 |
-| Test coverage, packages/spatial | 97.89% stmts | whole src tree, `./benchmarks/run-coverage.sh` | `benchmarks/results/wp2-coverage.txt` | 2026-09-18 |
-| Test coverage, sensor-simulator | 72.07% stmts | whole src tree; was 51.86% at WP0 | `benchmarks/results/wp2-coverage.txt` | 2026-09-18 |
-| Test coverage, stream-processor | 37.07% stmts | whole src tree; was 38.18% — `cells.ts` left for the package | `benchmarks/results/wp2-coverage.txt` | 2026-09-18 |
-| Test coverage, alert-processor | 46.87% stmts | whole src tree, integration suite skipped | `benchmarks/results/wp2-coverage.txt` | 2026-09-18 |
-| Test coverage, api | 18.91% stmts | whole src tree | `benchmarks/results/wp2-coverage.txt` | 2026-09-18 |
+| Test coverage, correlation-engine | 100% stmts, 99.31% branches | whole src tree, `./benchmarks/run-coverage.sh`; 144 tests | `benchmarks/results/wp2b-coverage.txt` | 2026-09-18 |
+| Test coverage, `incidentLifecycle.ts` | 100% stmts, 100% branches | as above | `benchmarks/results/wp2b-coverage.txt` | 2026-09-18 |
+| Test coverage, packages/spatial | 97.89% stmts | whole src tree, `./benchmarks/run-coverage.sh` | `benchmarks/results/wp2b-coverage.txt` | 2026-09-18 |
+| Test coverage, sensor-simulator | 72.07% stmts | whole src tree; was 51.86% at WP0 | `benchmarks/results/wp2b-coverage.txt` | 2026-09-18 |
+| Test coverage, stream-processor | 37.07% stmts | whole src tree; was 38.18% — `cells.ts` left for the package | `benchmarks/results/wp2b-coverage.txt` | 2026-09-18 |
+| Test coverage, alert-processor | 46.87% stmts | whole src tree, integration suite skipped | `benchmarks/results/wp2b-coverage.txt` | 2026-09-18 |
+| Test coverage, api | 18.91% stmts | whole src tree | `benchmarks/results/wp2b-coverage.txt` | 2026-09-18 |
 | Simulator event-time rate | 1.000× real time | 20 zones, `SIM_STEP_MS=1000`, `SPEED_MULTIPLIER=1` | `benchmarks/results/d8-simulator-event-clock-after.txt` | 2026-09-17 |
 | Zone-to-zone event-time divergence | 0 ms over 60 s (spread bounded at ≤ 20 ms) | as above; was 5681 ms before the fix | `benchmarks/results/d8-simulator-event-clock-after.txt` | 2026-09-17 |
 | Wall clock per 60 s confirmation window | 60.00 s at 1×, 1.00 s at 60× | as above | `benchmarks/results/d8-simulator-event-clock-after.txt` | 2026-09-17 |
@@ -113,10 +115,16 @@ truly complete when both are ticked.
 | Differential fuzz operations compared | 551,871 events, 551,871 partition comparisons | as above; partitions compared after *every* operation, not at the end | `benchmarks/results/wp2-differential-fuzz.txt` | 2026-09-18 |
 | What the fuzz actually reached | 7,732 component splits, 110,754 expiries, 21,089 early recoveries, 5,305 full teardowns, largest component 28 | as above | `benchmarks/results/wp2-differential-fuzz.txt` | 2026-09-18 |
 | Fuzz wall clock | ~11 s for the whole suite | node v20.14.0, win32 x64, one machine; the core has no I/O, which is why this is cheap enough to keep in `npm test` | `benchmarks/results/wp2-differential-fuzz.txt` | 2026-09-18 |
+| **Incident invariant violations** | **0** | 2,500 sequences, seed 42: 2,000 random-graph + 500 over a 5×4 lattice, plus 600 more at `closeGraceMs: 0` and `minZones: 1` | `benchmarks/results/wp2b-incident-properties.txt` | 2026-09-18 |
+| Incident invariant checks performed | 156,773 events, 156,773 checks | as above; all four invariants re-checked after *every* event, not at the end | `benchmarks/results/wp2b-incident-properties.txt` | 2026-09-18 |
+| Byte-identical replays | 1,000 / 1,000 sequences | whole JSON event stream compared as text, ids included; plus 300 with neighbour lists reversed | `benchmarks/results/wp2b-incident-properties.txt` | 2026-09-18 |
+| What the incident properties reached | 6,219 opened (186 from splits), 663 merges, 4,019 closes (670 superseded / 1,596 grace / 1,753 dissolved), 1,655 revivals from DRAINING, largest incident 19 | as above | `benchmarks/results/wp2b-incident-properties.txt` | 2026-09-18 |
+| Defects found by the property tests | 1 — incident id reused after a close at an unchanged watermark | found at `minZones: 1`, shrunk to 30 events; fixed in `2291166` | `benchmarks/results/wp2b-incident-properties.txt` | 2026-09-18 |
 
 Re-run coverage with `./benchmarks/run-coverage.sh`, the WP1 rows with the command in the
 header of `benchmarks/neighbour-graph.ts`, and the WP2 rows with
-`cd services/correlation-engine && npx jest differentialFuzz --verbose`. The coverage figures are low and they are honest — the previous
+`cd services/correlation-engine && npx jest differentialFuzz --verbose`, and the WP2b rows with
+`cd services/correlation-engine && npx jest incidentProperties --verbose`. The coverage figures are low and they are honest — the previous
 "90%+" figure was scoped to two hand-picked files. **Do not put a coverage number on the resume**
 (`05-RESUME.md` §5 already says to drop it); these rows exist so the claim is traceable if asked.
 
@@ -145,6 +153,79 @@ Tracked from `01-ARCHITECTURE.md` §3.
 ## Session log
 
 Append one entry per working session. Newest at the top. Keep to 2–4 lines.
+
+### 2026-09-18 — S5: WP2b (correlation core — incident lifecycle)
+
+- **WP2b done, so WP2 is done.** `IncidentLifecycle` turns the component partition into named,
+  long-lived incidents: OPENED / GREW / SHRANK / MERGED / CLOSED, deterministic ids, merge and
+  split policy, property tests, ADR-003. 144 tests in the service, 100% statements *and* branches
+  over `incidentLifecycle.ts`.
+- **A component is not an incident, and the gap is the whole work package.** A component is
+  anonymous, instantaneous and set-valued. `{Z-1,Z-2,Z-3}` at 12:00 and `{Z-1,Z-2,Z-3,Z-4}` at
+  12:01 are two different sets; whether they are one incident or two is not a fact about the data,
+  it is a decision. Four decisions had to be made and each had a defensible alternative — be able
+  to state the alternative before stating the choice.
+- **The id is a hash of the facts: `SHA-256(scheme | openedAt | sorted seed members)`, 64 bits.**
+  Not a UUID (two runs of the same scenario would name the same incident differently, and every
+  measurement in this project is a replay compared against a replay). Not a counter (stable only
+  if incidents open in the same order every time, which stops being true the moment two coarse-cell
+  partitions are consumed concurrently). Not the union-find root (it is re-picked on every
+  rebuild). Not a hash of the *current* members (it would change on every GREW, i.e. no identity
+  at all). Hashing the *seed* set fixes the name at birth.
+- **The property tests found a real defect, which is the reason to write them.** The uniqueness
+  argument was: the preimage has `openedAt`, components are disjoint, event time is a monotonic
+  watermark — therefore no two incidents can share a preimage. Monotonic is not strictly
+  increasing. A zone that recovers and re-degrades inside one millisecond closes an incident and
+  opens an identical one at an unchanged watermark, minting the same id twice; at `minZones: 1`
+  that is a single pair of messages. fast-check shrank it to 30 events in five steps. Fixed by
+  retaining the ids retired **at the current watermark instant** and disambiguating against them,
+  pruned the moment event time moves past them. Unit tests and a careful correctness argument both
+  missed it.
+- **Merge is won by age, split by inheritance.** Survivor of a merge is the earlier `openedAt`,
+  ties broken lexicographically — age is monotone, so the decision cannot be revised later,
+  whereas "larger wins" would hop the identity between two incidents while an engineer watched.
+  Losers get a terminal `CLOSED` carrying `supersededBy`, so a consumer holding the dead id
+  follows a pointer instead of noticing silence. On a split, the fragment that *inherited the
+  most members* keeps the id (not the largest fragment: a fragment can be large because unrelated
+  zones joined it in the same batch), others open fresh with `splitFrom`. On-call continuity over
+  set-theoretic purity, per ADR-003.
+- **`DRAINING` is not decoration.** "Close after `INCIDENT_CLOSE_GRACE_MS` below the minimum" and
+  "no OPEN incident is below the minimum" cannot both hold with two statuses. The third state is
+  what a grace period *is*, and an incident that regrows during it comes back as the same id —
+  1,655 such revivals in the property run, which is the flapping-fault case the grace period
+  exists for.
+- **Identity survives shrinkage, not disappearance.** An incident whose every member leaves closes
+  at once with `DISSOLVED` rather than serving out the grace period: with no live member there is
+  nothing that could reclaim the id, so waiting only delays a certain close. The consequence is
+  real and deliberate — a fault that goes quiet longer than `CORRELATION_WINDOW_MS` and returns is
+  two incidents, because claiming continuity across a gap where no zone was degraded would assert
+  a causal link the data does not support.
+- **The reachability oracle is written independently, on purpose.** The property that two zones
+  share a component iff a path of active adjacent zones connects them is checked against a plain
+  BFS in the test support, not against `NaiveConnectivity`. A comparison between the two
+  production implementations cannot fail when both are wrong in the same way; this can.
+- **Acceptance met: 2,500 sequences, 156,773 invariant checks after every event, 0 violations**,
+  and 1,000 byte-identical replays of the whole JSON event stream, ids included. Reach is measured
+  rather than hoped for: 6,219 incidents opened (186 of them from splits), 663 merges, 4,019
+  closes across all three reasons, largest incident 19. Evidence:
+  `benchmarks/results/wp2b-incident-properties.txt`.
+
+**Understanding checkpoint questions (answer closed-book before reading ADR-003):**
+1. Why is `incidentId` a hash and not a UUID? Name two things that break with a UUID and one that
+   breaks with a counter.
+2. A zone bridges two existing incidents. Walk through exactly what is emitted, and say what a
+   consumer that already received *both* ids is supposed to do.
+3. That bridging zone then expires and the component splits. Which fragment keeps the id, why that
+   rule and not "the largest fragment", and why is the whole policy better than closing the
+   original and opening one incident per fragment?
+4. Why can an incident be `DRAINING` but never `OPEN` with two members, when `INCIDENT_MIN_ZONES`
+   is three?
+5. An incident's last member recovers, and ten seconds later the same three zones degrade again.
+   One incident or two? Defend it.
+6. The property tests found an id being reused. What was wrong with the uniqueness argument, and
+   why would neither the unit tests nor the differential fuzz have caught it?
+7. `reconcile` takes the whole partition rather than a delta. What does that cost, why is it the
+   right trade here, and what would have to be true for it to stop being so?
 
 ### 2026-09-18 — S4: WP2a (correlation core — window + connectivity)
 
