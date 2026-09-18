@@ -26,7 +26,7 @@ separates a defended decision from an arbitrary one.
 | ADR-001 | H3 hex cells for adjacency, over geohash, spatial trees and raw distance | WP1 ✅ |
 | ADR-002 | Incremental union-find with local rebuild on expiry | WP2a ✅ |
 | ADR-003 | Incident identity, merge and split semantics | WP2b ✅ |
-| ADR-004 | Partitioning on coarse H3 cells | WP3 |
+| ADR-004 | Partitioning on coarse H3 cells, and batching the correlation consumer | WP3 ✅ |
 | ADR-005 | Simulated event time: one virtual clock, bounded per-zone lag, adjustable speed | WP6a ✅ |
 | ADR-006 | Ground truth by construction: one severity function, two thresholds | WP6a ✅ |
 | ADR-007 | A Kafka record timestamp is not application event time | S2c ✅ |
