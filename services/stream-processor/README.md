@@ -80,36 +80,86 @@ Exact transition rules with hysteresis:
 
 **⚠️ Direct NORMAL → CRITICAL transitions are NOT allowed**
 
-### Alert Emission
-- **Only on state changes**: No continuous alerts
-- **Deduplication**: Prevents duplicate alerts for same transition
-- **Console output**: JSON-formatted alerts for Phase 2
+### Degradation emission
 
-## 📊 Alert Format
+One message to `zone.degradations` per *state change*, in both directions, keyed by the zone's
+**coarse H3 cell**. Nothing is published while a state holds, and a repeat transition inside a
+second is suppressed.
+
+Three things about that sentence are decisions, not details:
+
+**It is not called an alert any more.** An alert is a claim that something is worth a human's
+attention, and one sensor crossing a threshold is not that claim. This stage emits *observations
+that a zone's degradation state changed*; deciding which of them add up to something worth
+telling a person is `correlation-engine`'s job, and it is the whole thesis of the project
+(`docs/01-ARCHITECTURE.md` §4.1).
+
+**The key is the coarse cell, not the zone id.** Keying by `zoneId` is right for the stage
+*upstream* — per-zone windowing needs all of a zone's events together — and exactly wrong here,
+because it hashes geographic neighbours uniformly at random across partitions and correlation's
+entire question is whether two zones are next to each other. ADR-004.
+
+**Recoveries are published too.** A transition to `NORMAL` travels on this topic like any other.
+Without it the correlation window holds a recovered zone as an incident member for the rest of
+`CORRELATION_WINDOW_MS` — up to two minutes of an incident reported over ground that is already
+fine — and incidents would only ever close on a timeout rather than on evidence.
+
+## 📊 `ZoneDegradation` format
 
 ```json
 {
   "zoneId": "Z-3",
+  "h3Cell": "85283473fffffff",
+  "h3CoarseCell": "83283ffffffffff",
+  "latitude": 50.51,
+  "longitude": 10.14,
   "previousState": "STRESSED",
   "currentState": "CRITICAL",
+  "severity": 0.92,
   "avg1m": 0.92,
   "avg5m": 0.81,
-  "detectedAt": 1707123456789
+  "eventTime": 1707123456789
 }
 ```
 
+`severity` is `max(avg1m, avg5m)`, clamped to [0, 1] — three states are not enough for an
+incident spanning sixty zones to say how bad it is, and the max is the worst thing either window
+the detector actually consults has to say. `src/severity.ts` has the argument against a mean.
+
+`eventTime` is event time and nothing else: not `Date.now()`, and not the Kafka record timestamp,
+which the producer deliberately does not set. Retention is evaluated against the record
+timestamp, and this pipeline's event time sits at a fixed historical epoch — that mismatch
+destroyed 5.76M messages as defect D10. ADR-007.
+
+### What happens when a publish fails
+
+Bounded retry, then the dead letter queue, then — only if the DLQ is also unreachable — a throw,
+which stops the offset committing and lets the raw event be redelivered. A degradation is a fact
+nothing re-emits, so it gets the expensive policy. The raw *sensor events* this service consumes
+get the cheap one (retry, then drop-and-count), because each is one sample of a signal re-sampled
+every second. Both halves of that are argued in `docs/adr/ADR-000-delivery-semantics-and-dlq.md`.
+
 ## 🎯 Integration with Phase 1
 
-### Running with Sensor Simulator
-1. Start Kafka infrastructure: `cd infra && docker-compose up -d`
-2. Start sensor simulator: `cd services/sensor-simulator && npm run dev`
-3. Start stream processor: `cd services/stream-processor && npm run dev`
+### Running it
+The whole stack, including this service, comes up with `cd infra && docker compose up -d --build`.
+To run it from source against that stack instead, stop the container and:
+
+```bash
+cd packages/spatial && npm install          # builds dist/ via prepare
+cd packages/kafka-recovery && npm install   # likewise
+cd services/stream-processor && npm install && npm run dev
+```
+
+The broker advertises `localhost:9092` to the host and `kafka:29092` inside the network, so both
+work against the same data.
 
 ### Expected Behavior
 - Processor consumes events from `raw.zone.events`
-- Maintains per-zone state in memory
-- Logs window metrics and state transitions
-- Emits alerts only when states change
+- Maintains per-zone state in memory, bounded by an event-time idle TTL (D5)
+- Registers every zone it sees in `zones:registry`, including ones that never leave NORMAL —
+  the correlation engine needs their positions to build the neighbour graph
+- Publishes one `zone.degradations` message per state change, in both directions
 - Handles out-of-order events correctly (event-time semantics)
 
 ## 🔍 Monitoring Output
