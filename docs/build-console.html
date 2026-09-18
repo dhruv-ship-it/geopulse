@@ -631,6 +631,20 @@ so they must be complete.
 
 Run it against all four scenarios and commit the raw results.
 
+Two things S7 changed that the harness must account for:
+- The lifecycle reconciles on an event-time grid (RECONCILE_TICK_MS), and a boundary is only
+  reconciled when a LATER message crosses it. At the end of a replay there is no later message,
+  so the final interval is never announced — call CorrelationEngine.flush() or lose it. It is
+  idempotent and it closes out on the grid.
+- Adjacency is res 5 ring 2, not ring 1 (D12). Record RECONCILE_TICK_MS, H3_RESOLUTION and
+  NEIGHBOUR_RING_SIZE in every results file: all three change the output, and a number without
+  them is not reproducible. describeConfig() prints the correlation geometry as one line for
+  exactly this.
+
+Do not run the GEOPULSE_INTEGRATION suites against the same stack while a scored run is in
+flight. They produce their own degradations and incidents onto the same topics and into the same
+database, and the contamination is silent.
+
 Commit incrementally. Update docs/STATUS.md — and fill in the measured-numbers table with whatever
 it actually produced, good or bad.`,
 m:`<p><span class="flag">First real numbers</span></p>
