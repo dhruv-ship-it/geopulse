@@ -93,3 +93,41 @@ scenario:  regional-anomaly, 400 zones, seed 42, speed 60x
   FAIL — expected exactly 1 incident, got 7.
   This is the acceptance criterion for WP3. Do not record any downstream
   number until it passes; they would all be measuring the wrong thing.
+
+================================================================
+WHAT THIS FILE IS
+================================================================
+
+The run that found defect D14. Kept because the failure is more instructive than the fix.
+
+Read the two clusters in the incident table. The fault was injected from 2160 s to 10800 s of
+event time — 2.4 simulated hours — but every incident here lives in one of two narrow bands:
+
+  2485 s .. 2680 s    (the onset)
+  10750 s .. 10865 s  (the decay)
+
+Between them, 8,070 seconds in which the system had no incident open at all, while 62 zones sat
+continuously STRESSED or CRITICAL.
+
+The cause is a mismatch between two components that were each behaving correctly:
+
+  - stream-processor is EDGE-triggered. StateMachine.shouldAlert fires only when a zone CHANGES
+    state. 62 zones crossed into STRESSED over ~80 seconds, and then said nothing for the next
+    2.2 hours, because nothing changed.
+
+  - the correlation window is LEVEL-expecting. Its membership rule is "a zone is an active member
+    while it has degraded within the last CORRELATION_WINDOW_MS" (120 s).
+
+So the engine's event-time watermark froze at 2555 s, its window expired every member at 2680 s,
+and the incident closed in the middle of an ongoing fault. The stats show the watermark frozen
+and then fast-forwarding 1,610 ticks when the recovery messages finally arrived.
+
+The seven incidents are then: four as the onset component formed and expired unevenly, and three
+more at the decay, where CRITICAL -> STRESSED is still a degradation and re-admitted zones that
+had long since been forgotten.
+
+The fix is DEGRADATION_REASSERT_MS: a still-degraded zone re-publishes its degradation every
+30 s of event time, which is what the window was always assuming it would. See
+stream-processor/src/streamProcessor.ts and ADR-008.
+
+The passing run is benchmarks/results/wp3-e2e-regional.txt.

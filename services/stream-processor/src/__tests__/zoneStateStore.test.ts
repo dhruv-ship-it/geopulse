@@ -11,7 +11,8 @@ const newState = (): ZoneStateData => ({
   window5m: TimeWindowManager.createWindow(),
   stressedSince: null,
   criticalSince: null,
-  lastAlertTimestamp: null
+  lastAlertTimestamp: null,
+  lastDegradationPublishedAt: null
 });
 
 function store(idleTtlMs = 15 * MINUTE, sweepIntervalMs = MINUTE) {

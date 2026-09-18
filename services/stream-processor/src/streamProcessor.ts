@@ -1,4 +1,10 @@
-import { SensorEvent, ZoneStateData, StateTransitionAlert, ZoneDegradation } from './types';
+import {
+  SensorEvent,
+  StateTransitionAlert,
+  ZoneDegradation,
+  ZoneState,
+  ZoneStateData
+} from './types';
 import { TimeWindowManager } from './timeWindowManager';
 import { StateMachine } from './stateMachine';
 import { KafkaEventConsumer } from './kafkaConsumer';
@@ -6,7 +12,7 @@ import { RedisClient } from './redisClient';
 import { RedisWriter } from './redisWriter';
 import { KafkaDegradationProducer } from './kafkaProducer';
 import { severityOf } from './severity';
-import { ZoneStateStore } from './zoneStateStore';
+import { ZoneEntry, ZoneStateStore } from './zoneStateStore';
 import { logger } from './logger';
 import {
   degradationPublishLatencyMs,
@@ -17,6 +23,50 @@ import {
   zonesEvictedTotal,
   zonesTrackedGauge
 } from './metrics';
+
+/**
+ * How much event time may pass before a still-degraded zone says so again.
+ *
+ * ## Defect D14: this service is edge-triggered, the correlation window is level-expecting
+ *
+ * `StateMachine.shouldAlert` fires only when a zone *changes* state, which is exactly right for
+ * something that persists transitions. It is exactly wrong as the only input to a correlation
+ * window whose membership rule is "a zone is an active member while it has degraded within the
+ * last `CORRELATION_WINDOW_MS`".
+ *
+ * The first end-to-end run showed the consequence, and it is severe. A regional fault ran for 2.4
+ * simulated hours; 62 zones crossed into STRESSED over about 80 seconds and then sat there,
+ * steadily degraded, emitting nothing because nothing changed. The correlation engine's watermark
+ * froze, its 120-second window expired every member, and the incident **closed while the fault was
+ * still happening** — then re-opened in fragments when the zones eventually recovered. One fault,
+ * seven incidents, and a 2.2-hour hole in the middle during which the system believed everything
+ * was fine.
+ *
+ * Both halves were behaving as designed. The mismatch was in how they were joined: one emits
+ * edges, the other integrates levels.
+ *
+ * ## Why re-assert rather than make membership permanent
+ *
+ * The alternative is to keep a zone a member until an explicit recovery arrives, dropping the
+ * window entirely. That trades this bug for a worse one: a `stream-processor` that dies holding
+ * degraded zones leaves them in an incident forever, because the recovery that would release them
+ * is never produced. Time-bounded membership means the system's belief decays without evidence,
+ * which is the property you want from a monitoring system. Re-assertion is what *supplies* that
+ * evidence — and it makes true the claim ADR-000's amendment already rested on, that a degradation
+ * is one sample of a re-sampled signal rather than a one-off edge.
+ *
+ * ## Choosing the interval
+ *
+ * It must be comfortably below `CORRELATION_WINDOW_MS` (120 s), or a member expires between
+ * re-assertions and the incident flickers. 30 s gives four assertions per window, so it takes
+ * three consecutive publish failures to drop a zone.
+ *
+ * The cost is bounded and small: one message per degraded zone per interval. A 62-zone fault is
+ * about 2 messages/s, and even all 400 zones degrading at once is ~13/s — against the 400/s of raw
+ * sensor events this same service is already consuming. Set it to 0 to disable, which restores the
+ * edge-only behaviour for anyone who wants to reproduce D14.
+ */
+const DEGRADATION_REASSERT_MS = parseInt(process.env.DEGRADATION_REASSERT_MS || '30000', 10);
 
 /**
  * Main stream processor that consumes events and derives operational states
@@ -32,6 +82,7 @@ export class StreamProcessor {
   private transitionCounter: number = 0;
   private degradationCounter: number = 0;
   private recoveryCounter: number = 0;
+  private reassertCounter: number = 0;
   /** Producer dead-letter tally already mirrored into the metric, so it is not double counted. */
   private deadLetteredSeen: number = 0;
   private startTime: number = 0;
@@ -123,6 +174,7 @@ export class StreamProcessor {
         producer: this.degradationProducer?.stats(),
         degradationsPublished: this.degradationCounter,
         recoveriesPublished: this.recoveryCounter,
+        reassertionsPublished: this.reassertCounter,
         averageRate: rate,
         zonesTracked: this.zones.size,
         zonesEvicted: this.zones.evicted,
@@ -227,41 +279,15 @@ export class StreamProcessor {
       // member until its correlation window expires, so an incident is reported over ground that
       // recovered up to CORRELATION_WINDOW_MS ago. Recoveries are also what let an incident
       // shrink and close on the evidence rather than on a timeout.
-      const degradation: ZoneDegradation = {
-        zoneId: event.zoneId,
-        h3Cell: entry.cells.h3Cell,
-        h3CoarseCell: entry.cells.h3CoarseCell,
-        latitude: entry.coordinates.latitude,
-        longitude: entry.coordinates.longitude,
+      await this.publishDegradation(
+        event,
+        entry,
         previousState,
-        currentState: nextState,
-        severity: severityOf(avg1m, avg5m),
+        nextState,
         avg1m,
         avg5m,
-        // Event time, from the event. Not Date.now(), and not the Kafka record timestamp —
-        // ADR-007, and the 5.76M messages D10 cost.
-        eventTime: event.eventTimestamp
-      };
-
-      // Publishes, or retries, or dead-letters, or throws — see KafkaDegradationProducer.
-      // Deliberately not wrapped in try/catch here: a throw from this line must reach
-      // eachMessage so the offset is not committed. That is defect D1.
-      if (this.degradationProducer) {
-        const start = Date.now();
-        await this.degradationProducer.publish(degradation);
-        degradationPublishLatencyMs.observe(Date.now() - start);
-
-        const recovery = nextState === 'NORMAL';
-        degradationsPublishedTotal.labels(recovery ? 'recovery' : 'degradation').inc();
-        if (recovery) {
-          this.recoveryCounter++;
-        } else {
-          this.degradationCounter++;
-        }
-        const producerStats = this.degradationProducer.stats();
-        degradationsDeadLetteredTotal.inc(producerStats.deadLettered - this.deadLetteredSeen);
-        this.deadLetteredSeen = producerStats.deadLettered;
-      }
+        'transition'
+      );
 
       // Emit local log alert (unchanged behavior)
       this.emitAlert({
@@ -272,9 +298,18 @@ export class StreamProcessor {
         avg5m,
         detectedAt: event.eventTimestamp
       });
-      
+
       zoneState.lastAlertTimestamp = event.eventTimestamp;
       this.transitionCounter++;
+    } else if (
+      nextState !== 'NORMAL' &&
+      DEGRADATION_REASSERT_MS > 0 &&
+      (zoneState.lastDegradationPublishedAt === null ||
+        event.eventTimestamp - zoneState.lastDegradationPublishedAt >= DEGRADATION_REASSERT_MS)
+    ) {
+      // The zone has not changed state, and that is exactly the case this exists for: it is
+      // still degraded and nothing would otherwise say so. See DEGRADATION_REASSERT_MS (D14).
+      await this.publishDegradation(event, entry, nextState, nextState, avg1m, avg5m, 'reassert');
     }
 
     // Update state first
@@ -344,6 +379,70 @@ export class StreamProcessor {
   }
 
   /**
+   * Build and publish one `ZoneDegradation`, and remember when we did.
+   *
+   * Shared by the transition path and the re-assertion path so the two cannot describe a zone
+   * differently — a re-assertion carrying a stale severity would be worse than no re-assertion at
+   * all, because it would look like evidence.
+   */
+  private async publishDegradation(
+    event: SensorEvent,
+    entry: ZoneEntry,
+    previousState: ZoneState,
+    currentState: ZoneState,
+    avg1m: number,
+    avg5m: number,
+    reason: 'transition' | 'reassert'
+  ): Promise<void> {
+    if (!this.degradationProducer) {
+      return;
+    }
+
+    const degradation: ZoneDegradation = {
+      zoneId: event.zoneId,
+      h3Cell: entry.cells.h3Cell,
+      h3CoarseCell: entry.cells.h3CoarseCell,
+      latitude: entry.coordinates.latitude,
+      longitude: entry.coordinates.longitude,
+      previousState,
+      currentState,
+      severity: severityOf(avg1m, avg5m),
+      avg1m,
+      avg5m,
+      // Event time, from the event. Not Date.now(), and not the Kafka record timestamp —
+      // ADR-007, and the 5.76M messages D10 cost.
+      eventTime: event.eventTimestamp
+    };
+
+    // Publishes, or retries, or dead-letters, or throws — see KafkaDegradationProducer.
+    // Deliberately not wrapped in try/catch: a throw from here must reach eachMessage so the
+    // offset is not committed. That is defect D1.
+    const start = Date.now();
+    await this.degradationProducer.publish(degradation);
+    degradationPublishLatencyMs.observe(Date.now() - start);
+
+    const direction =
+      reason === 'reassert' ? 'reassert' : currentState === 'NORMAL' ? 'recovery' : 'degradation';
+    degradationsPublishedTotal.labels(direction).inc();
+    if (direction === 'recovery') {
+      this.recoveryCounter++;
+    } else if (direction === 'reassert') {
+      this.reassertCounter++;
+    } else {
+      this.degradationCounter++;
+    }
+
+    // Advanced only on a successful publish. One that failed and was dead-lettered has told the
+    // correlation engine nothing, so the next event should try again rather than sit out another
+    // whole interval.
+    entry.state.lastDegradationPublishedAt = event.eventTimestamp;
+
+    const producerStats = this.degradationProducer.stats();
+    degradationsDeadLetteredTotal.inc(producerStats.deadLettered - this.deadLetteredSeen);
+    this.deadLetteredSeen = producerStats.deadLettered;
+  }
+
+  /**
    * Create initial zone state
    */
   private createZoneState(): ZoneStateData {
@@ -353,7 +452,8 @@ export class StreamProcessor {
       window5m: TimeWindowManager.createWindow(),
       stressedSince: null,
       criticalSince: null,
-      lastAlertTimestamp: null
+      lastAlertTimestamp: null,
+      lastDegradationPublishedAt: null
     };
   }
 

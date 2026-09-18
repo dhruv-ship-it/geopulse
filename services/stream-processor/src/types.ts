@@ -29,6 +29,13 @@ export interface ZoneStateData {
   stressedSince: number | null; // timestamp when STRESSED condition started
   criticalSince: number | null; // timestamp when CRITICAL condition started
   lastAlertTimestamp: number | null;
+  /**
+   * Event time of the last degradation published for this zone, transition or re-assertion.
+   *
+   * Exists because the correlation window is *level*-expecting and this service is
+   * *edge*-triggered — see `DEGRADATION_REASSERT_MS` in `streamProcessor.ts` (defect D14).
+   */
+  lastDegradationPublishedAt: number | null;
 }
 
 export interface StateTransitionAlert {

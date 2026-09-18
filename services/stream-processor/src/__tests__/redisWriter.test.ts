@@ -70,7 +70,8 @@ const stateData = (): ZoneStateData => {
     window5m,
     stressedSince: null,
     criticalSince: 1_700_000_000_000,
-    lastAlertTimestamp: null
+    lastAlertTimestamp: null,
+  lastDegradationPublishedAt: null
   };
 };
 

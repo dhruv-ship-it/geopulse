@@ -90,12 +90,13 @@ if [ -n "$META" ]; then
   echo "  file: ${META#"$ROOT"/}"
   node -e '
     const m = require(process.argv[1]);
-    const anomalies = m.anomalies ?? [];
-    console.log(`  anomalies injected: ${anomalies.length}`);
-    for (const a of anomalies) {
-      console.log(`    ${a.anomalyId}: ${(a.labelledZones ?? a.zones ?? []).length} labelled zones, radius ${a.radiusKm} km`);
-    }
+    console.log(`  scenario:            ${m.scenario}, seed ${m.seed}, ${m.zoneCount} zones`);
+    console.log(`  anomalies injected:  ${m.anomalyCount}`);
+    console.log(`  zones labelled:      ${m.affectedZoneCount} (severity >= ${m.minAffectedSeverity})`);
+    console.log(`  event-time span:     ${m.startEventTime} .. ${m.endEventTime} (${m.simulatedHours}h)`);
   ' "$META" 2>/dev/null || echo "  (could not parse)"
+  GT_ANOMALIES=$(node -e 'console.log(require(process.argv[1]).anomalyCount)' "$META" 2>/dev/null)
+  GT_ZONES=$(node -e 'console.log(require(process.argv[1]).affectedZoneCount)' "$META" 2>/dev/null)
 else
   echo "  NOT FOUND — the simulator did not write ground truth"
 fi
@@ -158,6 +159,8 @@ $COMPOSE exec -T postgres psql -U geopulse -d geopulse -c \
 
 echo
 echo "================================================================"
+echo "  anomalies injected:        ${GT_ANOMALIES:-?}"
+echo "  zones labelled by truth:   ${GT_ZONES:-?}"
 echo "  incidents:                 ${TOTAL:-?}"
 echo "  largest incident:          ${PEAK:-?} zones"
 echo "  distinct zones in members: ${MEMBERS:-?}"

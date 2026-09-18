@@ -144,6 +144,10 @@ services:
       REDIS_HOST: redis
       REDIS_PORT: "6379"
       REDIS_PASSWORD: ${REDIS_PASSWORD:-geopulse-dev}
+      # A still-degraded zone re-asserts on this cadence. Must stay well below
+      # CORRELATION_WINDOW_MS or membership lapses under a live fault — that was D14, and
+      # ADR-008 has the run that found it. 0 reproduces the defect.
+      DEGRADATION_REASSERT_MS: ${DEGRADATION_REASSERT_MS:-30000}
       LOG_LEVEL: ${LOG_LEVEL:-info}
     restart: unless-stopped
 

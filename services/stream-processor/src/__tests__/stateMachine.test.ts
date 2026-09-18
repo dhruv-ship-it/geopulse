@@ -8,6 +8,7 @@ const baseStateData = (): ZoneStateData => ({
   stressedSince: null,
   criticalSince: null,
   lastAlertTimestamp: null,
+  lastDegradationPublishedAt: null,
 });
 
 describe('StateMachine transitions', () => {
