@@ -158,9 +158,9 @@ export interface IncidentLifecycleStats {
   /** Fragments that lost the id in a split and had to open fresh (or fold into a neighbour). */
   splitFragments: number;
   /**
-   * Times a minted id was already live and had to be disambiguated. Should be 0 forever — see
-   * `mintId`. A non-zero value here is either a genuine 64-bit collision or a broken assumption
-   * about event-time monotonicity, and both are worth knowing about.
+   * Times a minted id was already taken and had to be disambiguated — see `mintId`. Non-zero
+   * only when an incident closes and an identical seed set reopens at the very same event-time
+   * instant, or on a genuine 64-bit SHA-256 collision.
    */
   idCollisions: number;
   activeIncidents: number;
@@ -202,6 +202,15 @@ export class IncidentLifecycle {
    * anyway.
    */
   private readonly claims = new Map<string, string>();
+
+  /**
+   * Ids of incidents that closed at the current watermark instant, with the `openedAt` they were
+   * minted from. Read by `mintId` so a closed id is never reissued, and pruned the moment event
+   * time moves past it — at which point no future incident can hash to it anyway, because
+   * `openedAt` is part of the preimage. So this holds at most the incidents that closed in one
+   * instant, not a growing graveyard.
+   */
+  private readonly retired = new Map<string, number>();
 
   private highWatermark = 0;
 
@@ -266,6 +275,12 @@ export class IncidentLifecycle {
     }
     const now = this.highWatermark;
     this.reconciles++;
+
+    for (const [incidentId, openedAt] of this.retired) {
+      if (openedAt < now) {
+        this.retired.delete(incidentId);
+      }
+    }
 
     const partition = this.validate(components);
 
@@ -436,14 +451,17 @@ export class IncidentLifecycle {
    * two independent consumers of the same stream agree on the name of an incident without
    * coordinating.
    *
-   * **Why it is unique without a registry.** Two incidents can only collide if they hash the same
-   * preimage, which means the same seed member set at the same `openedAt`. Components of a
+   * **Why it is unique, and what the loop below is for.** Two incidents collide only if they
+   * hash the same preimage: the same seed member set at the same `openedAt`. Components of a
    * partition are disjoint, so no two incidents open with the same seed set in the same
-   * reconcile; and `openedAt` is a monotonic watermark, so a later reconcile stamps a strictly
-   * greater time unless it is the same instant — and at the same instant it is the same reconcile
-   * again. The only remaining route is an actual 64-bit SHA-256 collision, which the loop below
-   * resolves deterministically (a replay disambiguates identically) rather than by crashing a
-   * stream processor. `stats().idCollisions` counts it; it should stay 0.
+   * reconcile, and `openedAt` is a monotonic watermark, so a later reconcile never stamps an
+   * earlier time. That leaves exactly one real route, and the property tests found it: an
+   * incident closes and an identical seed set reopens **at the same event-time instant** — a
+   * zone that recovers and re-degrades inside one millisecond, which at `minZones: 1` is a
+   * single message pair. `retired` closes that hole, and the loop disambiguates by extending the
+   * preimage. The remaining route is an actual 64-bit SHA-256 collision, handled by the same
+   * loop. Both resolutions are a function of the input alone, so a replay disambiguates
+   * identically; `stats().idCollisions` counts how often it happened.
    *
    * 64 bits is chosen against the size of the population it has to separate: incidents live for
    * minutes and a busy deployment produces thousands a day, so a birthday collision is a
@@ -456,7 +474,7 @@ export class IncidentLifecycle {
       const preimage = `${ID_SCHEME}|${openedAt}|${seedMembers.join(',')}${suffix}`;
       const digest = createHash('sha256').update(preimage, 'utf8').digest('hex');
       const incidentId = `${this.idPrefix}-${digest.slice(0, ID_HEX_LENGTH)}`;
-      if (!this.incidents.has(incidentId)) {
+      if (!this.incidents.has(incidentId) && !this.retired.has(incidentId)) {
         return incidentId;
       }
       this.idCollisions++;
@@ -554,6 +572,7 @@ export class IncidentLifecycle {
     incident.updatedAt = now;
     incident.supersededBy = supersededBy;
     this.incidents.delete(incident.incidentId);
+    this.retired.set(incident.incidentId, incident.openedAt);
     this.closedCount++;
 
     return this.buildEvent(incident, 'CLOSED', now, [], removed, {

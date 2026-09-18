@@ -1,0 +1,67 @@
+GeoPulse WP2b - property-based tests for IncidentLifecycle
+generated: 2026-09-18T00:00:00Z
+commit:    PLACEHOLDER
+node v20.14.0 on win32 x64
+
+Command: cd services/correlation-engine && npx jest incidentProperties --verbose
+
+There is no oracle for incident identity - "which incident is this" is a policy, not a
+computation - so this asserts what must be true of the answer whatever the policy decides,
+after EVERY event of EVERY sequence:
+
+  1. every active zone is in exactly one component
+  2. two zones share a component iff a path of active adjacent zones connects them,
+     checked against a BFS written independently of both connectivity implementations
+  3. no OPEN incident is below INCIDENT_MIN_ZONES, and no component at or above the
+     minimum is without an incident
+  4. replaying the same sequence produces a byte-identical event stream, ids included
+
+The seed is pinned (42), so this is the same set of sequences on every machine.
+
+Configuration: windowMs 60000, compactionIntervalMs 5000, minZones 3, closeGraceMs 20000,
+14-zone universe over random symmetric graphs, plus a 5x4 lattice, plus runs at
+closeGraceMs 0 and at minZones 1.
+
+WHAT THIS RUN FOUND
+The first run of these properties failed with "OPENED for INC-... after it was CLOSED".
+An incident that closes and an identical seed set that reopens at the SAME event-time
+millisecond mint the same id, because the preimage is (seed members + openedAt) and the
+watermark had not moved. Fixed by keeping the ids retired at the current watermark instant
+and disambiguating against them; the set is pruned as soon as event time moves past them,
+so it holds one instant's closures rather than a growing graveyard. See ADR-003.
+
+
+incident lifecycle property summary
+  seed                   42
+  sequences              2,500
+  events applied         156,773
+  invariant checks       156,773
+  invariant violations   0
+  incidents opened       6,219
+    of which from splits 186
+  GREW / SHRANK          16,535 / 9,391
+  merges                 663
+  closes                 4,019
+    superseded           670
+    grace expired        1,596
+    dissolved            1,753
+  revivals from DRAINING 1,655
+  largest incident       19
+  most concurrent        4
+PASS src/core/__tests__/incidentProperties.test.ts (9.363 s)
+  incident lifecycle — structural invariants
+    √ holds every invariant across 2,000 randomised sequences (2700 ms)
+    √ holds them over a lattice, where components are large and splits are common (972 ms)
+    √ holds them with the grace period at zero, where a dip below the minimum closes at once (396 ms)
+    √ holds them at minZones = 1, where every degraded zone is an incident (540 ms)
+  incident lifecycle — replay determinism
+    √ replays 1,000 sequences to a byte-identical event stream (2636 ms)
+    √ is insensitive to the order components are handed over in (616 ms)
+  incident lifecycle — what the generator actually reaches
+    √ opens, grows, shrinks, merges, splits, revives and closes incidents (2 ms)
+
+Test Suites: 1 passed, 1 total
+Tests:       7 passed, 7 total
+Snapshots:   0 total
+Time:        9.635 s, estimated 13 s
+Ran all test suites matching /incidentProperties/i.
