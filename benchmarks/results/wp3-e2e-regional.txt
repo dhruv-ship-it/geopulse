@@ -29,3 +29,97 @@ scenario:  regional-anomaly, 400 zones, seed 42, speed 60x
    Container geopulse-simulator  Started
 
 ## Waiting for the simulator to finish (timeout 3600s)
+  simulator state: exited after 2475s
+  produced 5760000 events over 14401 simulated seconds
+  achieved speed: 5x real time (SPEED_MULTIPLIER=60 is a ceiling, not a promise)
+  draining for 45s so the correlation window lapses and the incident closes
+
+## Ground truth — what was injected
+
+  file: evals/groundtruth/20260115T120000Z-regional-anomaly-seed42.meta.json
+  scenario:            regional-anomaly, seed 42, 400 zones
+  anomalies injected:  1
+  zones labelled:      62 (severity >= 0.85)
+  event-time span:     1768478400000 .. 1768492800000 (4h)
+
+## Stage by stage
+
+  stream-processor (degradations published):
+    state transitions on the topic:
+      -> STRESSED: 4334 transitions across 62 distinct zones
+      -> CRITICAL: 12926 transitions across 47 distinct zones
+      -> NORMAL: 62 transitions across 62 distinct zones
+
+  correlation-engine (/health):
+    geometry:   window=120000ms compaction=5000ms reconcileTick=5000ms minZones=3 closeGrace=60000ms maxBatch=1000
+    batches:    17320, messages 17322 (17260 degradations, 62 recoveries)
+    ticks:      1678 reconciled, 0 fast-forwarded
+    rejected:   0, stale 0
+    incidents:  {"reconciles":1678,"membersReconciled":103127,"opened":2,"grew":11,"shrank":16,"merged":0,"closed":2,"superseded":0,"splits":3,"splitFragments":4,"idCollisions":0,"activeIncidents":0,"draining":0,"peakActiveIncidents":2,"watermark":1768489265000}
+    consumer:   {"batches":17320,"messages":17322,"skipped":0,"unparseable":0}
+    dispatcher: {"dispatched":31,"flushes":28,"retainedFlushes":0,"pending":0}
+
+## THE ANSWER — incidents in Postgres
+
+       incident_id      | status | member_count |   peak_severity    | radius_km |   opened_at   |   closed_at   
+  ----------------------+--------+--------------+--------------------+-----------+---------------+---------------
+   INC-7833bfd098e220b5 | CLOSED |            0 | 0.9503000000000005 |           | 1768480885000 | 1768489265000
+   INC-2702da1e86941e50 | CLOSED |            0 | 0.7023566666666631 |           | 1768489240000 | 1768489255000
+  (2 rows)
+  
+
+  incident timeline:
+   event_type | count 
+  ------------+-------
+   SHRANK     |    16
+   GREW       |    11
+   CLOSED     |     2
+   OPENED     |     2
+  (4 rows)
+  
+
+================================================================
+  anomalies injected:        1
+  zones labelled by truth:   62
+  incidents:                 2
+  largest incident:          0 zones
+  distinct zones in members: 62
+  lifecycle events:          31
+  distinct zones degraded:   62
+  collapse:                  62 degraded zones -> 2 incident(s)
+================================================================
+
+  FAIL — expected exactly 1 incident, got 2.
+  This is the acceptance criterion for WP3. Do not record any downstream
+  number until it passes; they would all be measuring the wrong thing.
+
+================================================================
+READING THIS RESULT
+================================================================
+
+The check says FAIL because it counts rows in `incidents` and expects 1. It found 2. What those
+two rows are matters more than the count:
+
+  INC-7833bfd098e220b5   opened 2485 s, closed 10865 s   peak 62 members
+  INC-2702da1e86941e50   opened 10840 s, closed 10855 s  peak 3 members
+
+The first one IS the fault. It opens as the region degrades, holds every one of the 62 labelled
+zones, and lives for 8,380 seconds - the injected fault ran from 2160 s to 10800 s. That is the
+project's central claim working: 62 co-degrading zones reported as one thing.
+
+The second is a 15-second fragment at the decay. As the fault heals unevenly the surviving
+degraded zones briefly stop being one connected component, and one of the islands reached
+INCIDENT_MIN_ZONES (3, exactly) long enough to be named before it closed.
+
+It is left in rather than tuned out. Raising INCIDENT_CLOSE_GRACE_MS, raising INCIDENT_MIN_ZONES,
+or suppressing splits from a dissolving parent would each make this file print PASS, and choosing
+one of them because it makes an assertion pass is how a measurement stops meaning anything. The
+honest position is that the correlation is right and the split policy is one notch too eager at
+the tail of an incident.
+
+For comparison, the same scenario before the D14 fix (wp3-e2e-regional-before-d14.txt):
+
+                        before      after
+  incidents             7           2
+  main incident life    195 s       8,380 s
+  gap with no incident  8,070 s     none

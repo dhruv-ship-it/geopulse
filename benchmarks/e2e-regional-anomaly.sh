@@ -146,10 +146,22 @@ $COMPOSE exec -T postgres psql -U geopulse -d geopulse -c \
      FROM incidents ORDER BY opened_at;" 2>/dev/null | sed 's/^/  /'
 
 TOTAL=$(psql_q "SELECT count(*) FROM incidents;")
-PEAK=$(psql_q "SELECT coalesce(max(member_count), 0) FROM incidents;")
+# Peak membership comes from the EVENT stream, not from the incidents row.
+#
+# `incidents.member_count` is the current value, and a closed incident's current value is 0 — so
+# reading the maximum from there reported "largest incident: 0 zones" for a run whose largest
+# incident held all 62. A summary line in a benchmark file that is confidently wrong is worse
+# than one that is missing.
+PEAK=$(psql_q "SELECT coalesce(max(member_count), 0) FROM incident_events;")
 MEMBERS=$(psql_q "SELECT count(DISTINCT zone_id) FROM incident_members;")
 EVENTS=$(psql_q "SELECT count(*) FROM incident_events;")
 DEGRADED=$(psql_q "SELECT count(DISTINCT zone_id) FROM zone_alerts WHERE current_state <> 'NORMAL';")
+
+echo
+echo "  peak membership per incident:"
+$COMPOSE exec -T postgres psql -U geopulse -d geopulse -c   "SELECT incident_id, max(member_count) AS peak_members,
+          max(event_time) - min(event_time) AS lifespan_ms
+     FROM incident_events GROUP BY 1 ORDER BY 2 DESC;" 2>/dev/null | sed 's/^/  /'
 
 echo
 echo "  incident timeline:"
@@ -162,7 +174,7 @@ echo "================================================================"
 echo "  anomalies injected:        ${GT_ANOMALIES:-?}"
 echo "  zones labelled by truth:   ${GT_ZONES:-?}"
 echo "  incidents:                 ${TOTAL:-?}"
-echo "  largest incident:          ${PEAK:-?} zones"
+echo "  largest incident, at peak: ${PEAK:-?} zones"
 echo "  distinct zones in members: ${MEMBERS:-?}"
 echo "  lifecycle events:          ${EVENTS:-?}"
 echo "  distinct zones degraded:   ${DEGRADED:-?}"

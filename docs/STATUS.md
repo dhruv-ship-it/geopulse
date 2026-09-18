@@ -10,7 +10,7 @@
 | Field | Value |
 |---|---|
 | **Phase** | Phase 1 — Spatiotemporal Incident Correlation |
-| **Active work package** | S7 done — **WP3 is complete**. Items 6 and 8 landed (Postgres incident persistence; `stream-processor` emits `ZoneDegradation` keyed by coarse cell, recoveries included), every service is containerised, and `docker compose up` brings up the whole stack. **The acceptance criterion passed against live infrastructure: one injected regional anomaly, 62 degraded zones, one incident.** WP6b is now fully unblocked. |
+| **Active work package** | S7 done — **WP3 is built and running end to end**. Items 6 and 8 landed (Postgres incident persistence; `stream-processor` emits `ZoneDegradation` keyed by coarse cell, recoveries included), every service is containerised, and `docker compose up` brings up the whole stack. **The acceptance criterion is substantially met but not cleanly passed**: the injected regional anomaly produces one incident that holds all 62 zones for the whole 8,380-second fault, plus one 15-second split fragment during the decay — so the script's own check reads 2, not 1. See the caveat under WP3. WP6b is unblocked. |
 | **Last updated** | 2026-09-18 |
 | **Last commit at time of writing** | `74de429` |
 | **Blocked on** | Nothing. Next is WP6b (the eval harness), which must call `CorrelationEngine.flush()` at the end of a replay or lose the final reconcile tick. |
@@ -32,7 +32,7 @@
 | WP1 | Spatial layer (H3 neighbour graph) | ☑ Done | `@geopulse/spatial` — `NeighbourGraph` plus the cells module moved out of stream-processor. All three acceptance criteria met: lookup flat at 0.58→1.03 µs across 1k→100k zones against 39.6→4630.7 µs for a naive scan; antimeridian, polar and pentagon tests; ADR-001. Understanding checkpoint still owed. |
 | WP2a | Correlation core — window + connectivity | ☑ Done | `CorrelationWindow`, `TimeAwareConnectivity` (union-find + local rebuild), `NaiveConnectivity` (the oracle), and the differential fuzz. Acceptance met: **11,000 sequences / 551,871 operations, 0 divergences**. ADR-002. Understanding checkpoint still owed. |
 | WP2b | Correlation core — `IncidentLifecycle` | ☑ Done | OPENED / GREW / MERGED / SHRANK / CLOSED, `DRAINING` as the third status, SHA-256 incident ids, merge by age, split by inheritance. Acceptance met: **2,500 property sequences / 156,773 invariant checks, 0 violations**, and a byte-identical replay over 1,000 of them. 100% statements and branches on the module. ADR-003. Understanding checkpoint still owed. |
-| WP3 | `correlation-engine` service | ☑ Done | All eight items. S6 built the service (1–5, 7); S7 added Postgres persistence (item 6 — `incidents` / `incident_members` / `incident_events`, a second consumer group inside `alert-processor`), the `stream-processor` degradation producer (item 8, recoveries included), and Dockerfiles for every service. **All three acceptance criteria met against live infrastructure**: one regional anomaly → one incident, `docker compose up` brings up the full stack, `/metrics` exposes every listed metric. Three real defects found by the live run and fixed — D12 (adjacency too tight), D13 (the reconcile cadence) and D14 (edge-triggered producer against a level-expecting window). ADR-004 + amendment, ADR-008. **283 tests in the engine, 97.29% stmts / 96.97% branches.** Understanding checkpoint still owed. |
+| WP3 | `correlation-engine` service | ⚠ Built, one acceptance criterion not cleanly met | All eight items. S6 built the service (1–5, 7); S7 added Postgres persistence (item 6 — `incidents` / `incident_members` / `incident_events`, a second consumer group inside `alert-processor`), the `stream-processor` degradation producer (item 8, recoveries included), and Dockerfiles for every service. Two of three acceptance criteria met outright: `docker compose up` brings up the full stack, and `/metrics` exposes every listed metric plus eleven more. **The third — "a regional anomaly producing exactly one incident" — reads 2, not 1** (`benchmarks/results/wp3-e2e-regional.txt`). One incident holds all 62 zones across the entire fault; the second is a 15-second fragment that appears while the fault dissolves unevenly. That is a split-policy question rather than a correlation failure, and it is **deliberately left unturned** — tuning `INCIDENT_CLOSE_GRACE_MS` until the number reads 1 would be fitting the parameter to the assertion. Three real defects found by the live runs and fixed: D12 (adjacency too tight), D13 (reconcile cadence), D14 (edge-triggered producer against a level-expecting window). ADR-004 + amendment, ADR-008. **283 tests in the engine, 97.29% stmts / 96.97% branches.** Understanding checkpoint still owed. |
 | WP4 | Propagation vector | ☐ Not started | |
 | WP5 | API + live map UI | ☐ Not started | |
 | WP6a | Simulator ground truth | ☑ Done | All four scenarios inject, all four emit §2-schema labels, determinism asserted byte-for-byte, labels verified against the real state machine. ADR-006. Understanding checkpoint still owed. |
@@ -85,7 +85,12 @@ truly complete when both are ticked.
 
 | Metric | Value | Scenario / config | Source file | Date |
 |---|---|---|---|---|
-| **Incidents from one injected regional anomaly** | **TBD** | 400 zones, seed 42, 4 simulated hours, full stack, res 5 ring 2 | `benchmarks/results/wp3-e2e-regional.txt` | 2026-09-18 |
+| **Incidents from one injected regional anomaly** | **2** — one holding all 62 zones for the full 8,380 s fault, one 15 s split fragment at the decay | 400 zones, seed 42, 4 simulated hours, full stack, res 5 ring 2, reconcileTick 5 s, reassert 30 s | `benchmarks/results/wp3-e2e-regional.txt` | 2026-09-18 |
+| Peak membership per incident, same run | 62 (main), 3 (fragment — exactly `INCIDENT_MIN_ZONES`) | as above | `benchmarks/results/wp3-e2e-regional.txt` | 2026-09-18 |
+| Lifecycle events for that fault | 31 (2 OPENED, 11 GREW, 16 SHRANK, 2 CLOSED) against 62 degrading zones | as above | `benchmarks/results/wp3-e2e-regional.txt` | 2026-09-18 |
+| Main incident lifespan, before vs after the D14 fix | 195 s → 8,380 s (the fault itself ran 8,640 s) | as above; before-fix run kept alongside | `wp3-e2e-regional-before-d14.txt` vs `wp3-e2e-regional.txt` | 2026-09-18 |
+| Incidents from one fault, before vs after the D14 fix | 7 → 2 | as above | `wp3-e2e-regional-before-d14.txt` vs `wp3-e2e-regional.txt` | 2026-09-18 |
+| Degradation messages during the fault, with re-assertion | 17,322 (17,260 degradations + 62 recoveries) against 109 state transitions | 62 degraded zones re-asserting every 30 s of event time for 8,380 s | `benchmarks/results/wp3-e2e-regional.txt` | 2026-09-18 |
 | Anomaly zones that form one component, res 5 ring 1 | regional 7 components (largest 35/62), propagating 10 (largest 20/57), multi 4 and 7, noise 1 each | 400 zones, seed 42; the adjacency the engine shipped with before D12 | `benchmarks/results/wp3-anomaly-connectivity.txt` | 2026-09-18 |
 | Anomaly zones that form one component, res 5 ring 2 | **1 component for every injected anomaly**, all four scenarios | as above; the setting D12 moved to | `benchmarks/results/wp3-anomaly-connectivity.txt` | 2026-09-18 |
 | Over-grouping check at res 5 ring 2 | multi-anomaly: 2 components across 2 anomalies; noise: 16 across 16 | as above — ring 2 fixes fragmentation without merging things that must stay apart | `benchmarks/results/wp3-anomaly-connectivity.txt` | 2026-09-18 |
@@ -172,10 +177,18 @@ Append one entry per working session. Newest at the top. Keep to 2–4 lines.
 
 ### 2026-09-18 — S7: WP3 items 6 and 8, containerisation, and the first end-to-end run
 
-- **WP3 is done, and the acceptance criterion passed against live infrastructure.** One injected
-  regional anomaly, 62 zones degrading, **one incident**. Evidence:
-  `benchmarks/results/wp3-e2e-regional.txt`, produced by `./benchmarks/e2e-regional-anomaly.sh`,
-  which brings the whole stack up from a clean volume and checks the number itself.
+- **WP3 runs end to end, and the acceptance criterion is substantially — not cleanly — met.** One
+  injected regional anomaly produces **one incident holding all 62 zones for the whole
+  8,380-second fault**, plus a **15-second split fragment** during the decay, so the script's own
+  check reads 2 and prints FAIL. Evidence: `benchmarks/results/wp3-e2e-regional.txt`, produced by
+  `./benchmarks/e2e-regional-anomaly.sh`, which brings the whole stack up from a clean volume and
+  checks the number itself. The fragment is left in rather than tuned away: `INCIDENT_CLOSE_GRACE_MS`
+  or the split policy could make the number read 1, and doing that to satisfy an assertion is how a
+  measurement stops meaning anything. It is stated here and in the results file instead.
+- **What the number actually says.** Peak membership: 62 for the main incident (every labelled
+  zone), 3 for the fragment — exactly `INCIDENT_MIN_ZONES`, which is what a marginal artefact looks
+  like. 62 degradations collapse to 31 lifecycle events across 2 incidents, one of which is
+  real. The thesis holds; the count is one fragment short of clean.
 - **The end-to-end run found three real defects, which is exactly what it was for.** All three
   were invisible to 283 passing unit tests: two were wrong *parameters* rather than wrong code, and
   the third (D14) was a mismatch between two components that were each behaving as specified. None
