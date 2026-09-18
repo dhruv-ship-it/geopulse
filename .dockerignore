@@ -1,0 +1,15 @@
+# Build context is the repo root for every service image (the services depend on packages/
+# through file: paths, so a per-service context cannot see them). Keeping this list tight is
+# what stops that decision costing a multi-hundred-megabyte context per build.
+**/node_modules
+**/dist
+**/coverage
+.git
+.github
+docs
+benchmarks/results
+evals/results
+**/*.tsbuildinfo
+**/.env
+**/.env.*
+!**/.env.example

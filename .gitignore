@@ -56,7 +56,10 @@ services/sensor-simulator/dist/
 services/sensor-simulator/node_modules/
 
 # Docker
-.dockerignore
+# .dockerignore is deliberately NOT ignored. Every service image builds from the repo root, so
+# that file is what keeps node_modules and dist out of the build context — without it a fresh
+# clone builds a context hundreds of megabytes larger and copies host node_modules over the
+# ones the image just installed. It is build configuration, not local clutter.
 
 # Local development
 *.local
