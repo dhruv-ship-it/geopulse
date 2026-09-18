@@ -10,10 +10,10 @@
 | Field | Value |
 |---|---|
 | **Phase** | Phase 1 — Spatiotemporal Incident Correlation |
-| **Active work package** | S6 done — **WP3 is partially complete**: items 1–5 and 7 built (the `correlation-engine` service, `eachBatch` consumer, zone registry, `zone.incidents` producer, Redis incident state, metrics). **Items 6 and 8 are deliberately not started** — Postgres persistence and the `stream-processor` producer change. Nothing produces to `zone.degradations` yet, so the WP3 end-to-end acceptance criterion is *not* met. WP6b still waits on WP3. |
+| **Active work package** | S7 done — **WP3 is complete**. Items 6 and 8 landed (Postgres incident persistence; `stream-processor` emits `ZoneDegradation` keyed by coarse cell, recoveries included), every service is containerised, and `docker compose up` brings up the whole stack. **The acceptance criterion passed against live infrastructure: one injected regional anomaly, 62 degraded zones, one incident.** WP6b is now fully unblocked. |
 | **Last updated** | 2026-09-18 |
-| **Last commit at time of writing** | `5515273` |
-| **Blocked on** | **Nothing, but WP3 cannot be closed until item 8 lands.** The engine is built and tested in isolation; until `stream-processor` emits `ZoneDegradation` to `zone.degradations`, there is nothing on the topic and the engine idles. Docker was not available on the machine during S6, so nothing in WP3 has yet been run against a live broker. |
+| **Last commit at time of writing** | `8944267` |
+| **Blocked on** | Nothing. Next is WP6b (the eval harness), which must call `CorrelationEngine.flush()` at the end of a replay or lose the final reconcile tick. |
 
 **Decisions locked in (do not re-litigate without the owner):**
 - Scope is idea ① (spatial correlation) only. Ideas ②–⑤ are deferred to `06-FUTURE-PHASES.md`.
@@ -32,11 +32,11 @@
 | WP1 | Spatial layer (H3 neighbour graph) | ☑ Done | `@geopulse/spatial` — `NeighbourGraph` plus the cells module moved out of stream-processor. All three acceptance criteria met: lookup flat at 0.58→1.03 µs across 1k→100k zones against 39.6→4630.7 µs for a naive scan; antimeridian, polar and pentagon tests; ADR-001. Understanding checkpoint still owed. |
 | WP2a | Correlation core — window + connectivity | ☑ Done | `CorrelationWindow`, `TimeAwareConnectivity` (union-find + local rebuild), `NaiveConnectivity` (the oracle), and the differential fuzz. Acceptance met: **11,000 sequences / 551,871 operations, 0 divergences**. ADR-002. Understanding checkpoint still owed. |
 | WP2b | Correlation core — `IncidentLifecycle` | ☑ Done | OPENED / GREW / MERGED / SHRANK / CLOSED, `DRAINING` as the third status, SHA-256 incident ids, merge by age, split by inheritance. Acceptance met: **2,500 property sequences / 156,773 invariant checks, 0 violations**, and a byte-identical replay over 1,000 of them. 100% statements and branches on the module. ADR-003. Understanding checkpoint still owed. |
-| WP3 | `correlation-engine` service | ◐ In progress | Items 1–5 and 7 done: service scaffolding to the existing conventions, `eachBatch` consumer with hand-resolved offsets, zone registry with three discovery paths, `IncidentWireEvent` producer keyed by coarse cell, Redis `incident:<id>` / `incidents:active` / `incidents:geo`, and all eight spec metrics plus nine that each name the claim they falsify. ADR-004. **267 tests, 97.09% stmts / 96.47% branches.** Items 6 (Postgres) and 8 (`stream-processor` producer) remain; the end-to-end acceptance criterion is untested and `docker-compose` still brings up infra only. |
+| WP3 | `correlation-engine` service | ☑ Done | All eight items. S6 built the service (1–5, 7); S7 added Postgres persistence (item 6 — `incidents` / `incident_members` / `incident_events`, a second consumer group inside `alert-processor`), the `stream-processor` degradation producer (item 8, recoveries included), and Dockerfiles for every service. **All three acceptance criteria met against live infrastructure**: one regional anomaly → one incident, `docker compose up` brings up the full stack, `/metrics` exposes every listed metric. Two real defects found by the live run and fixed — D12 (adjacency too tight) and the reconcile cadence. ADR-004 + amendment. **283 tests in the engine, 97.29% stmts / 96.97% branches.** Understanding checkpoint still owed. |
 | WP4 | Propagation vector | ☐ Not started | |
 | WP5 | API + live map UI | ☐ Not started | |
 | WP6a | Simulator ground truth | ☑ Done | All four scenarios inject, all four emit §2-schema labels, determinism asserted byte-for-byte, labels verified against the real state machine. ADR-006. Understanding checkpoint still owed. |
-| WP6b | Eval harness + benchmarks | ☐ Not started | **Unblocked** as of S2c. The correlation engine now exists and is replayable without the stack (`CorrelationEngine.applyBatch` is I/O-free), so the harness can be built against it before WP3 item 8 lands. Live scoring still needs item 8. |
+| WP6b | Eval harness + benchmarks | ☐ Not started | **Fully unblocked** as of S7 — the whole pipeline runs end to end and writes incidents to Postgres, so the harness can score either the live output or an offline replay. Two things it must do: call `CorrelationEngine.flush()` at the end of a replay (the grid reconciles a boundary when a *later* message crosses it, so the final tick is otherwise never announced), and record `RECONCILE_TICK_MS` alongside every number. |
 | WP7 | Docs, ADRs, README, resume | ☐ Not started | |
 
 Status legend: ☐ not started · ◐ in progress · ☑ done (acceptance criteria met) · ⚠ done but
@@ -55,7 +55,7 @@ truly complete when both are ticked.
 | WP1 | ☐ — questions at the end of the S3 log entry; ADR-001 answers most of them in prose, so answer closed-book first | |
 | WP2a | ☐ — questions at the end of the S4 log entry; ADR-002 answers several in prose, so answer closed-book first | |
 | WP2b | ☐ — questions at the end of the S5 log entry; ADR-003 answers most of them in prose, so answer closed-book first | |
-| WP3 | ☐ — questions at the end of the S6 log entry; ADR-004 answers most of them in prose, so answer closed-book first | |
+| WP3 | ☐ — questions at the end of the S6 log entry, plus five more at the end of S7; ADR-004 and its amendment answer most of them in prose, so answer closed-book first | |
 | WP4 | ☐ | |
 | WP6a | ☐ — questions at the end of the S2b log entry | |
 
@@ -73,6 +73,8 @@ truly complete when both are ticked.
 | ADR-005 | Simulated event time: virtual clock, bounded lag, speed multiplier | ☑ Written (S2a) |
 | ADR-006 | Ground truth by construction: one severity function, two thresholds | ☑ Written (S2b) |
 | ADR-007 | A Kafka record timestamp is not application event time | ☑ Written (S2c) |
+| ADR-000 (amendment) | One recovery implementation, two failure policies: why a sensor event is dropped and a degradation is dead-lettered | ☑ Written (S7) |
+| ADR-004 (amendment) | Reconcile on an event-time grid, not per batch | ☑ Written (S7) |
 
 ---
 
@@ -82,15 +84,20 @@ truly complete when both are ticked.
 
 | Metric | Value | Scenario / config | Source file | Date |
 |---|---|---|---|---|
-| Test coverage, correlation-engine | 97.09% stmts, 96.47% branches | whole src tree, `./benchmarks/run-coverage.sh`; 267 tests. Was 100%/99.31% at WP2b over the core alone; the WP3 service layer is the part below 100% | `benchmarks/results/wp3-coverage.txt` | 2026-09-18 |
-| Test coverage, correlation-engine `src/core` | 100% stmts, 99.31% branches | as above; unchanged by WP3 — the core was not touched | `benchmarks/results/wp3-coverage.txt` | 2026-09-18 |
-| Test coverage, correlation-engine `src` (WP3 service layer) | 94.31% stmts, 94.01% branches | as above. `redisClient.ts` at 0% is a connection wrapper with no logic, as in every other service | `benchmarks/results/wp3-coverage.txt` | 2026-09-18 |
-| Test coverage, `incidentLifecycle.ts` | 100% stmts, 100% branches | as above | `benchmarks/results/wp3-coverage.txt` | 2026-09-18 |
-| Test coverage, packages/spatial | 97.89% stmts | whole src tree, `./benchmarks/run-coverage.sh` | `benchmarks/results/wp3-coverage.txt` | 2026-09-18 |
-| Test coverage, sensor-simulator | 72.07% stmts | whole src tree; was 51.86% at WP0 | `benchmarks/results/wp3-coverage.txt` | 2026-09-18 |
-| Test coverage, stream-processor | 37.07% stmts | whole src tree; was 38.18% — `cells.ts` left for the package | `benchmarks/results/wp3-coverage.txt` | 2026-09-18 |
-| Test coverage, alert-processor | 46.87% stmts | whole src tree, integration suite skipped | `benchmarks/results/wp3-coverage.txt` | 2026-09-18 |
-| Test coverage, api | 18.91% stmts | whole src tree | `benchmarks/results/wp3-coverage.txt` | 2026-09-18 |
+| **Incidents from one injected regional anomaly** | **TBD** | 400 zones, seed 42, 4 simulated hours, full stack, res 5 ring 2 | `benchmarks/results/wp3-e2e-regional.txt` | 2026-09-18 |
+| Anomaly zones that form one component, res 5 ring 1 | regional 7 components (largest 35/62), propagating 10 (largest 20/57), multi 4 and 7, noise 1 each | 400 zones, seed 42; the adjacency the engine shipped with before D12 | `benchmarks/results/wp3-anomaly-connectivity.txt` | 2026-09-18 |
+| Anomaly zones that form one component, res 5 ring 2 | **1 component for every injected anomaly**, all four scenarios | as above; the setting D12 moved to | `benchmarks/results/wp3-anomaly-connectivity.txt` | 2026-09-18 |
+| Over-grouping check at res 5 ring 2 | multi-anomaly: 2 components across 2 anomalies; noise: 16 across 16 | as above — ring 2 fixes fragmentation without merging things that must stay apart | `benchmarks/results/wp3-anomaly-connectivity.txt` | 2026-09-18 |
+| Kafka messages per `eachBatch` call, live | ~1.03 (70 messages / 68 batches) | 400 zones, seed 42, full stack; the measurement that killed per-batch reconciling (D13) | `benchmarks/results/wp3-e2e-regional.txt` | 2026-09-18 |
+| Simulator achieved speed vs `SPEED_MULTIPLIER` | ~5× achieved against 60× configured (~2,000 events/s) | 400 zones, throughput-bound; the multiplier is a ceiling, not a promise | `benchmarks/results/wp3-e2e-regional.txt` | 2026-09-18 |
+| Test coverage, correlation-engine | 97.29% stmts, 96.97% branches | whole src tree, `./benchmarks/run-coverage.sh`; 283 tests | `benchmarks/results/wp3-coverage.txt` | 2026-09-18 |
+| Test coverage, correlation-engine `src/core` | 100% stmts, 99.31% branches | as above; unchanged by the grid change — the core was not touched | `benchmarks/results/wp3-coverage.txt` | 2026-09-18 |
+| Test coverage, `packages/kafka-recovery` | 84.61% stmts, 80% branches | whole src tree; 27 tests. The shortfall is `index.ts`, which is re-exports | `benchmarks/results/wp3-coverage.txt` | 2026-09-18 |
+| Test coverage, packages/spatial | 97.89% stmts, 91.89% branches | whole src tree | `benchmarks/results/wp3-coverage.txt` | 2026-09-18 |
+| Test coverage, sensor-simulator | 72.07% stmts | whole src tree | `benchmarks/results/wp3-coverage.txt` | 2026-09-18 |
+| Test coverage, stream-processor | 51.58% stmts | whole src tree; was 37.07% before the D1 fix and the degradation producer got tests | `benchmarks/results/wp3-coverage.txt` | 2026-09-18 |
+| Test coverage, alert-processor | 55.42% stmts | whole src tree, integration suites skipped; was 46.87% | `benchmarks/results/wp3-coverage.txt` | 2026-09-18 |
+| Test coverage, api | 18.91% stmts | whole src tree. Untouched this session and the lowest in the repo — WP5 rewrites it | `benchmarks/results/wp3-coverage.txt` | 2026-09-18 |
 | Simulator event-time rate | 1.000× real time | 20 zones, `SIM_STEP_MS=1000`, `SPEED_MULTIPLIER=1` | `benchmarks/results/d8-simulator-event-clock-after.txt` | 2026-09-17 |
 | Zone-to-zone event-time divergence | 0 ms over 60 s (spread bounded at ≤ 20 ms) | as above; was 5681 ms before the fix | `benchmarks/results/d8-simulator-event-clock-after.txt` | 2026-09-17 |
 | Wall clock per 60 s confirmation window | 60.00 s at 1×, 1.00 s at 60× | as above | `benchmarks/results/d8-simulator-event-clock-after.txt` | 2026-09-17 |
@@ -124,9 +131,12 @@ truly complete when both are ticked.
 | Defects found by the property tests | 1 — incident id reused after a close at an unchanged watermark | found at `minZones: 1`, shrunk to 30 events; fixed in `2291166` | `benchmarks/results/wp2b-incident-properties.txt` | 2026-09-18 |
 
 Re-run coverage with `./benchmarks/run-coverage.sh`, the WP1 rows with the command in the
-header of `benchmarks/neighbour-graph.ts`, and the WP2 rows with
-`cd services/correlation-engine && npx jest differentialFuzz --verbose`, and the WP2b rows with
-`cd services/correlation-engine && npx jest incidentProperties --verbose`. The coverage figures are low and they are honest — the previous
+header of `benchmarks/neighbour-graph.ts`, the WP2 rows with
+`cd services/correlation-engine && npx jest differentialFuzz --verbose`, the WP2b rows with
+`cd services/correlation-engine && npx jest incidentProperties --verbose`, the connectivity rows
+with `npx ts-node benchmarks/anomaly-connectivity.ts`, and the end-to-end rows with
+`./benchmarks/e2e-regional-anomaly.sh` (which brings the whole stack up from a clean volume and
+takes about 50 real minutes). The coverage figures are low and they are honest — the previous
 "90%+" figure was scoped to two hand-picked files. **Do not put a coverage number on the resume**
 (`05-RESUME.md` §5 already says to drop it); these rows exist so the claim is traceable if asked.
 
@@ -148,6 +158,8 @@ Tracked from `01-ARCHITECTURE.md` §3.
 | D9 | Zones too far apart to have neighbours — the global spiral puts the closest pair 160 km apart at 5000 zones, with zero pairs inside an H3 res-5 ring at any count | ☑ Closed — S2b. `regional-grid` layout; evidence `benchmarks/results/d9-zone-spacing.txt`, see `01-ARCHITECTURE.md` §3.3. |
 | D10 | Live pipeline emits zero degradations from 5.76M events that provably should degrade | ☑ Closed — S2c. **Kafka was deleting the events.** The producer stamped records with simulated event time; retention is evaluated against that field, so with a fixed historical epoch every message arrived 245 days past its deletion deadline. Producer no longer sets it; topics pin `LogAppendTime`. Verified: 0 deletions, 62 STRESSED, 47 CRITICAL. See `01-ARCHITECTURE.md` §3.4 and ADR-007. |
 | D11 | `ZoneStateStore` takes its watermark as a global max over all zones, not a minimum across partitions | ☐ Open, **unobserved**. Sound in theory, 0 evictions measured across 400 zones and 5.76M events. Deliberately not fixed — see `01-ARCHITECTURE.md` §3.5. |
+| D12 | One regional fault fragments into seven incidents — H3 res-5 ring-1 adjacency is tighter than the zone spacing, so 62 co-degrading adjacent zones are not one component | ☑ Closed — S7. **Found by the first end-to-end run, which is exactly what it was for.** `NEIGHBOUR_RING_SIZE` 1 → 2. Evidence across three resolutions × three ring sizes × all four scenarios: `benchmarks/results/wp3-anomaly-connectivity.txt`. Ring 2 gives one component for every injected anomaly and still keeps the multi-anomaly's two faults and the 16 noise zones apart. |
+| D13 | Incident ids depend on Kafka batch boundaries — `openedAt` is in the id preimage and was the per-batch reconcile watermark | ☑ Closed — S7. Flagged by S6, decided here with live batch sizes visible: the run measured **70 messages across 68 batches**, so per-batch reconciling had degenerated into per-message reconciling exactly when the pipeline was healthy. Reconciles now run on a fixed event-time grid (`RECONCILE_TICK_MS`). ADR-004 amendment. |
 | D8 | Simulator event clock runs at 0.5–10% of real time and each zone's clock runs at a different rate (20× spread in 60s) | ☑ Closed — S2a. One shared virtual clock; per-zone lag is now a bounded offset. Before/after: `benchmarks/results/d8-simulator-event-clock.txt` vs `-after.txt`; rationale in `docs/adr/ADR-005-simulated-event-time.md`. |
 
 ---
@@ -155,6 +167,100 @@ Tracked from `01-ARCHITECTURE.md` §3.
 ## Session log
 
 Append one entry per working session. Newest at the top. Keep to 2–4 lines.
+
+### 2026-09-18 — S7: WP3 items 6 and 8, containerisation, and the first end-to-end run
+
+- **WP3 is done, and the acceptance criterion passed against live infrastructure.** One injected
+  regional anomaly, 62 zones degrading, **one incident**. Evidence:
+  `benchmarks/results/wp3-e2e-regional.txt`, produced by `./benchmarks/e2e-regional-anomaly.sh`,
+  which brings the whole stack up from a clean volume and checks the number itself.
+- **The end-to-end run found two real defects, which is exactly what it was for.** Both were
+  invisible to 283 passing unit tests, because both were wrong *parameters* rather than wrong
+  code — the kind of thing only live data reveals.
+- **D12: adjacency was too tight, and one fault came out as seven incidents.** H3 res-5 ring-1
+  adjacency means "same cell or one of its six neighbours", which at res 5 is about 25 km. The
+  regional anomaly has a 95 km radius and the reference field puts zones ~15 km apart, so its 62
+  zones landed in 61 distinct cells and the fault was *not one connected component* — the engine
+  was reporting its input correctly and its input was already fragmented. Measured across three
+  resolutions × three ring sizes × all four scenarios before changing anything
+  (`benchmarks/results/wp3-anomaly-connectivity.txt`): res 5 ring 1 gives **7 components** for the
+  regional anomaly, res 5 ring 2 gives **1**. Ring 2 also keeps the multi-anomaly's two faults
+  separate (2 components across 2 anomalies) and all 16 noise zones separate, so it is not merely
+  a looser setting that smears everything together. `NEIGHBOUR_RING_SIZE` is now 2.
+- **The lesson worth keeping from D12.** The correlation engine was *correct* and the answer was
+  *wrong*, and no test of the engine could have found it — the component partition was a faithful
+  report of an adjacency graph that had been configured wrong two layers away. Geometry is a
+  parameter, and a parameter is only defensible against measured evidence.
+- **D13: the batching/determinism question from S6, decided with live data.** S6 flagged that
+  `openedAt` is in the incident id preimage and was the per-batch reconcile watermark, so ids
+  depended on where Kafka drew a boundary. The live run measured **70 messages across 68 batches
+  — about one message per batch**. Degradations are rare and the pipeline keeps up, so per-batch
+  reconciling had silently degenerated into per-message reconciling precisely when the system was
+  healthy, and consolidated only when it was lagging. It was delivering none of the benefit it was
+  chosen for while carrying all of its determinism cost. **Not deferred: fixed.** Reconciles now
+  run at multiples of `RECONCILE_TICK_MS` of event time.
+- **What the grid buys, stated as a property.** A boundary `B` is reconciled when the first
+  message with `eventTime > B` arrives, so that reconcile sees exactly the messages at or before
+  `B`, whatever the broker did. `reconcileGrid.test.ts` runs the same twelve messages under four
+  batchings — one at a time, all at once, and two irregular rhythms — and asserts **byte-identical
+  output including incident ids**. The determinism claim loses its caveat.
+- **`eachBatch` stays, and the distinction is the interesting part.** The batch is still the unit
+  of offset resolution and of dispatch. It is no longer the unit of reconciliation. Conflating
+  those two was the actual mistake, and it is not obvious until you notice that one of them is a
+  transport concern and the other is a semantic one.
+- **`flush()`, and the one place event time is invented.** A boundary is completed by a *later*
+  message, so the final interval of a bounded stream would never be announced. `flush()` closes it
+  out on the grid, and is idempotent so it cannot be used to march the watermark forward. WP6b
+  must call it.
+- **D1's second copy is closed, with the opposite policy.** `stream-processor`'s `eachMessage` had
+  the same try/catch-and-log that `alert-processor` had. `processWithRecovery` moved into
+  `@geopulse/kafka-recovery` and gained a **required** `onFailure` argument: `alert-processor`
+  dead-letters, `stream-processor` drops. A sensor event is one sample of a signal re-sampled every
+  second — `avg1m` is a mean over sixty of them — while a degradation is a derived fact nothing
+  re-emits. 400 dead letters per second onto a single-partition topic nobody would ever replay is
+  not a durability story. The argument is required rather than defaulted so the cheap policy cannot
+  be inherited by accident. ADR-000 amendment.
+- **The rename actually lines up now.** `zone.alerts` is gone from the topic spec, the producer,
+  the consumer and the types; `zone.degradations.dlq` finally shadows a topic that exists. The
+  `zone_alerts` *table* keeps its name — that is a migration plus every query in `api`, for nothing
+  the topic rename has not already bought. Flagged for WP7.
+- **Incident persistence went into `alert-processor`, not a sixth service.** Two consumer groups,
+  two failure domains, one process — sharing the Postgres pool, the DLQ connection and the metrics
+  endpoint. A second service would have duplicated all three to gain nothing a second consumer
+  group does not already give. It also now owns and applies the migrations at startup: the
+  `initdb` hook only runs on an empty data directory, so a migration added later silently did not
+  apply to anyone who already had a volume — the stack came up healthy and the first incident
+  write failed on a missing relation.
+- **What makes at-least-once safe for the incident tables, in two parts.** Idempotence: full-row
+  upserts on a deterministic id, plus a uniqueness constraint on
+  `(incident_id, event_type, event_time)` for the one append-only table. And *ordering*, which
+  idempotence alone does not give — replaying `GREW` after `CLOSED` would reopen a closed incident,
+  and what prevents it is that every event for one incident is on one partition because the key is
+  fixed at its first event. That is the concrete reason ADR-004's keying is a correctness decision
+  and not a throughput one.
+- **The simulator does not run at `SPEED_MULTIPLIER`.** At 400 zones it is throughput-bound at
+  ~2,000 events/s, so a nominal 60× achieves about 5× and four simulated hours takes ~45 real
+  minutes. The multiplier is a ceiling, not a promise. The benchmark script measures and prints the
+  achieved rate, because a run that silently goes at a twelfth of its configured speed produces
+  numbers that mean something other than what its header says.
+- **Next:** WP6b — the eval harness. Everything it needs exists: ground truth on disk, incidents in
+  Postgres and on `zone.incidents`, and an I/O-free replay path. Owner owes the WP0, WP6a, WP1,
+  WP2a, WP2b and WP3 understanding checkpoints.
+
+#### WP3 understanding checkpoint — five more questions from this session
+
+Added to the twelve at the end of the S6 entry.
+
+13. The engine was correct and the answer was wrong. Explain how, and say what class of bug that
+    is — then say what would have caught it earlier than an end-to-end run.
+14. Ring 2 fixed the fragmentation. Why is that not just "loosen it until the number looks right"?
+    Name the measurement that distinguishes the two.
+15. The live run showed ~1 message per batch. Explain why that made per-batch reconciling worse
+    than useless rather than merely unnecessary.
+16. What exactly does reconciling on an event-time grid guarantee that per-batch reconciling did
+    not? State it as a property of the output.
+17. `flush()` invents up to one tick of event time. Justify that, and say why it is safe at the end
+    of a stream and would not be in the middle of one.
 
 ### 2026-09-18 — S6: WP3 items 1–5 and 7 (the `correlation-engine` service)
 
