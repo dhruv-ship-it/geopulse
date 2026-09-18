@@ -81,12 +81,43 @@ describe('loadConfig', () => {
   it('allows a zero compaction interval — exact expiry, at the cost of a scan per batch', () => {
     expect(loadConfig({ COMPACTION_INTERVAL_MS: '0' }).compactionIntervalMs).toBe(0);
   });
+
+  it('defaults the reconcile grid to the compaction interval', () => {
+    expect(loadConfig({ COMPACTION_INTERVAL_MS: '2000' }).reconcileTickMs).toBe(2000);
+  });
+
+  it('keeps a usable reconcile grid when the compaction interval is zero', () => {
+    // A zero compaction interval says "sweep exactly, on every batch". That is a statement about
+    // expiry precision and not about how often to announce anything, and a grid of zero would not
+    // be a cadence at all.
+    const config = loadConfig({ COMPACTION_INTERVAL_MS: '0' });
+    expect(config.compactionIntervalMs).toBe(0);
+    expect(config.reconcileTickMs).toBe(5000);
+  });
+
+  it('lets the reconcile grid be set apart from the compaction interval', () => {
+    const config = loadConfig({ COMPACTION_INTERVAL_MS: '1000', RECONCILE_TICK_MS: '30000' });
+    expect(config.compactionIntervalMs).toBe(1000);
+    expect(config.reconcileTickMs).toBe(30000);
+  });
+
+  it('rejects a reconcile grid at or above the correlation window', () => {
+    // At that setting an incident can be born and expire without ever being described.
+    expect(() =>
+      loadConfig({ CORRELATION_WINDOW_MS: '30000', RECONCILE_TICK_MS: '30000' })
+    ).toThrow(/must be below/);
+  });
+
+  it('rejects a non-positive reconcile grid', () => {
+    expect(() => loadConfig({ RECONCILE_TICK_MS: '0' })).toThrow(/must be positive/);
+  });
 });
 
 describe('describeConfig', () => {
   it('renders the geometry a benchmark has to record alongside its numbers', () => {
     expect(describeConfig(loadConfig({}))).toBe(
-      'window=120000ms compaction=5000ms minZones=3 closeGrace=60000ms maxBatch=1000'
+      'window=120000ms compaction=5000ms reconcileTick=5000ms minZones=3 ' +
+        'closeGrace=60000ms maxBatch=1000'
     );
   });
 });

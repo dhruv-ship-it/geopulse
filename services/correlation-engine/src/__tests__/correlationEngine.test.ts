@@ -45,6 +45,23 @@ class Lattice implements AdjacencyProvider {
 
 const noPlacer = { observe: () => undefined };
 
+/**
+ * Apply a batch and then close the tick it ended in.
+ *
+ * The engine reconciles on a fixed event-time grid, not once per batch, so a batch that lands
+ * entirely inside one tick emits nothing until a later message carries the stream past the
+ * boundary. That is the property the grid exists for — output depends on the messages, not on
+ * where the fetch stopped — and it means a test that wants to see what a batch *did* has to say
+ * the stream ended, which is what `flush()` means. The grid itself is tested directly in
+ * `CorrelationEngine - the reconcile grid` below, without this helper.
+ */
+function applyBatch(
+  engine: CorrelationEngine,
+  messages: readonly ZoneDegradation[]
+): IncidentWireEvent[] {
+  return [...engine.applyBatch(messages), ...engine.flush()];
+}
+
 function degradation(
   zoneId: string,
   eventTime: number,
@@ -77,7 +94,7 @@ describe('CorrelationEngine — the collapse', () => {
   it('turns a burst of adjacent degradations into exactly one incident', () => {
     const engine = new CorrelationEngine(triangle(), noPlacer, OPTIONS);
 
-    const events = engine.applyBatch([
+    const events = applyBatch(engine, [
       degradation('Z-1', T0),
       degradation('Z-2', T0 + 1000),
       degradation('Z-3', T0 + 2000)
@@ -94,14 +111,14 @@ describe('CorrelationEngine — the collapse', () => {
 
   it('does not open an incident below the minimum size', () => {
     const engine = new CorrelationEngine(triangle(), noPlacer, OPTIONS);
-    const events = engine.applyBatch([degradation('Z-1', T0), degradation('Z-2', T0 + 1000)]);
+    const events = applyBatch(engine, [degradation('Z-1', T0), degradation('Z-2', T0 + 1000)]);
     expect(events).toEqual([]);
   });
 
   it('does not join zones that are not adjacent, however simultaneous they are', () => {
     // Three zones, no edges at all: three singleton components, no incident.
     const engine = new CorrelationEngine(new Lattice([]), noPlacer, OPTIONS);
-    const events = engine.applyBatch([
+    const events = applyBatch(engine, [
       degradation('Z-1', T0),
       degradation('Z-2', T0),
       degradation('Z-3', T0)
@@ -118,12 +135,12 @@ describe('CorrelationEngine — the collapse', () => {
     ]);
     const engine = new CorrelationEngine(lattice, noPlacer, OPTIONS);
 
-    engine.applyBatch([
+    applyBatch(engine, [
       degradation('Z-1', T0),
       degradation('Z-2', T0),
       degradation('Z-3', T0)
     ]);
-    const grown = engine.applyBatch([
+    const grown = applyBatch(engine, [
       degradation('Z-4', T0 + 1000),
       degradation('Z-5', T0 + 1100)
     ]);
@@ -148,17 +165,17 @@ describe('CorrelationEngine — the collapse', () => {
     ]);
     const engine = new CorrelationEngine(lattice, noPlacer, OPTIONS);
 
-    const first = engine.applyBatch([
+    const first = applyBatch(engine, [
       degradation('A-1', T0),
       degradation('A-2', T0),
       degradation('A-3', T0)
     ]);
-    const second = engine.applyBatch([
+    const second = applyBatch(engine, [
       degradation('B-1', T0 + 1000),
       degradation('B-2', T0 + 1000),
       degradation('B-3', T0 + 1000)
     ]);
-    const merged = engine.applyBatch([degradation('X-1', T0 + 2000)]);
+    const merged = applyBatch(engine, [degradation('X-1', T0 + 2000)]);
 
     const survivor = merged.find((event) => event.eventType === 'MERGED');
     const loser = merged.find((event) => event.eventType === 'CLOSED');
@@ -177,13 +194,13 @@ describe('CorrelationEngine — the collapse', () => {
 describe('CorrelationEngine — membership over time', () => {
   it('releases a member the moment it recovers, without waiting out the window', () => {
     const engine = new CorrelationEngine(triangle(), noPlacer, OPTIONS);
-    engine.applyBatch([
+    applyBatch(engine, [
       degradation('Z-1', T0),
       degradation('Z-2', T0),
       degradation('Z-3', T0)
     ]);
 
-    const shrunk = engine.applyBatch([recovery('Z-3', T0 + 1000)]);
+    const shrunk = applyBatch(engine, [recovery('Z-3', T0 + 1000)]);
 
     expect(shrunk).toHaveLength(1);
     expect(shrunk[0].eventType).toBe('SHRANK');
@@ -196,33 +213,39 @@ describe('CorrelationEngine — membership over time', () => {
 
   it('closes a draining incident once its grace period elapses in event time', () => {
     const engine = new CorrelationEngine(triangle(), noPlacer, OPTIONS);
-    engine.applyBatch([
+    applyBatch(engine, [
       degradation('Z-1', T0),
       degradation('Z-2', T0),
       degradation('Z-3', T0)
     ]);
-    engine.applyBatch([recovery('Z-3', T0 + 1000), recovery('Z-2', T0 + 1000)]);
+    applyBatch(engine, [recovery('Z-3', T0 + 1000), recovery('Z-2', T0 + 1000)]);
 
     // An unrelated zone keeps event time moving; nothing else happens.
-    const closed = engine.applyBatch([degradation('Z-far', T0 + 70000)]);
+    const closed = applyBatch(engine, [degradation('Z-far', T0 + 70000)]);
 
     const close = closed.find((event) => event.eventType === 'CLOSED');
     expect(close).toBeDefined();
     expect(close!.closeReason).toBe('GRACE_EXPIRED');
     expect(close!.status).toBe('CLOSED');
-    expect(close!.closedAt).toBe(T0 + 70000);
+    // T0 + 65000, not T0 + 70000. The grace period expired at T0 + 61000, and the reconcile grid
+    // closes the incident at the first boundary past that — which it reaches by running every
+    // intervening boundary when the Z-far message finally carries the stream forward. Under the
+    // old per-batch cadence this was reported at T0 + 70000, the arrival watermark, which dated
+    // the close to when an unrelated zone happened to report rather than to when the incident
+    // actually ended. The grid answer is both more precise and independent of who reported next.
+    expect(close!.closedAt).toBe(T0 + 65000);
   });
 
   it('expires members whose window ran out, and dissolves the incident with them', () => {
     const engine = new CorrelationEngine(triangle(), noPlacer, OPTIONS);
-    const opened = engine.applyBatch([
+    const opened = applyBatch(engine, [
       degradation('Z-1', T0),
       degradation('Z-2', T0),
       degradation('Z-3', T0)
     ]);
 
     // Past every member's deadline. Nothing refreshed them, so the sweep takes all three.
-    const closed = engine.applyBatch([degradation('Z-far', T0 + 130000)]);
+    const closed = applyBatch(engine, [degradation('Z-far', T0 + 130000)]);
 
     const close = closed.find((event) => event.eventType === 'CLOSED');
     expect(close).toBeDefined();
@@ -237,9 +260,9 @@ describe('CorrelationEngine — membership over time', () => {
 
   it('refuses a degradation whose whole window already lies behind the watermark', () => {
     const engine = new CorrelationEngine(triangle(), noPlacer, OPTIONS);
-    engine.applyBatch([degradation('Z-1', T0 + 500000)]);
+    applyBatch(engine, [degradation('Z-1', T0 + 500000)]);
 
-    const events = engine.applyBatch([degradation('Z-2', T0)]);
+    const events = applyBatch(engine, [degradation('Z-2', T0)]);
 
     expect(events).toEqual([]);
     expect(engine.stats().stale).toBe(1);
@@ -248,7 +271,7 @@ describe('CorrelationEngine — membership over time', () => {
 
   it('keeps a member alive while it keeps re-degrading', () => {
     const engine = new CorrelationEngine(triangle(), noPlacer, OPTIONS);
-    engine.applyBatch([
+    applyBatch(engine, [
       degradation('Z-1', T0),
       degradation('Z-2', T0),
       degradation('Z-3', T0)
@@ -256,7 +279,7 @@ describe('CorrelationEngine — membership over time', () => {
 
     // Refresh all three every 30s for five minutes of event time — well past windowMs.
     for (let offset = 30000; offset <= 300000; offset += 30000) {
-      engine.applyBatch([
+      applyBatch(engine, [
         degradation('Z-1', T0 + offset),
         degradation('Z-2', T0 + offset),
         degradation('Z-3', T0 + offset)
@@ -271,7 +294,7 @@ describe('CorrelationEngine — membership over time', () => {
 describe('CorrelationEngine — the wire event', () => {
   it('carries the footprint, severity and a fixed coarse-cell key', () => {
     const engine = new CorrelationEngine(triangle(), noPlacer, OPTIONS);
-    const [opened] = engine.applyBatch([
+    const [opened] = applyBatch(engine, [
       degradation('Z-1', T0, { h3CoarseCell: 'coarse-m', severity: 0.6 }),
       degradation('Z-2', T0, { h3CoarseCell: 'coarse-b', severity: 0.9 }),
       degradation('Z-3', T0, { h3CoarseCell: 'coarse-z', severity: 0.7 })
@@ -297,12 +320,12 @@ describe('CorrelationEngine — the wire event', () => {
     ]);
     const engine = new CorrelationEngine(lattice, noPlacer, OPTIONS);
 
-    const [opened] = engine.applyBatch([
+    const [opened] = applyBatch(engine, [
       degradation('Z-1', T0, { h3CoarseCell: 'coarse-m' }),
       degradation('Z-2', T0, { h3CoarseCell: 'coarse-m' }),
       degradation('Z-3', T0, { h3CoarseCell: 'coarse-m' })
     ]);
-    const [grown] = engine.applyBatch([
+    const [grown] = applyBatch(engine, [
       degradation('Z-4', T0 + 1000, { h3CoarseCell: 'coarse-a' })
     ]);
 
@@ -314,13 +337,13 @@ describe('CorrelationEngine — the wire event', () => {
 
   it('tracks peak severity separately from current severity', () => {
     const engine = new CorrelationEngine(triangle(), noPlacer, OPTIONS);
-    engine.applyBatch([
+    applyBatch(engine, [
       degradation('Z-1', T0, { severity: 0.95 }),
       degradation('Z-2', T0, { severity: 0.6 }),
       degradation('Z-3', T0, { severity: 0.6 })
     ]);
 
-    const [shrunk] = engine.applyBatch([recovery('Z-1', T0 + 1000)]);
+    const [shrunk] = applyBatch(engine, [recovery('Z-1', T0 + 1000)]);
 
     expect(shrunk.severity).toBeCloseTo(0.6, 10);
     expect(shrunk.peakSeverity).toBeCloseTo(0.95, 10);
@@ -333,12 +356,12 @@ describe('CorrelationEngine — the wire event', () => {
       ['Z-3', 'Z-4']
     ]);
     const engine = new CorrelationEngine(lattice, noPlacer, OPTIONS);
-    engine.applyBatch([
+    applyBatch(engine, [
       degradation('Z-1', T0, { severity: 0.99 }),
       degradation('Z-2', T0, { severity: 0.5 }),
       degradation('Z-3', T0, { severity: 0.5 })
     ]);
-    const [grown] = engine.applyBatch([degradation('Z-4', T0 + 1000, { severity: 0.5 })]);
+    const [grown] = applyBatch(engine, [degradation('Z-4', T0 + 1000, { severity: 0.5 })]);
 
     // A mean would have this incident looking *better* for having spread, which is backwards.
     expect(grown.severity).toBeCloseTo(0.99, 10);
@@ -364,7 +387,7 @@ describe('CorrelationEngine — unusable input', () => {
 
   it('skips a poison message and correlates the rest of the batch', () => {
     const engine = new CorrelationEngine(triangle(), noPlacer, OPTIONS);
-    const events = engine.applyBatch([
+    const events = applyBatch(engine, [
       degradation('Z-1', T0),
       { ...degradation('Z-bad', T0), latitude: Number.NaN },
       degradation('Z-2', T0),
@@ -378,20 +401,20 @@ describe('CorrelationEngine — unusable input', () => {
 
   it('does nothing at all for a batch that was entirely unusable', () => {
     const engine = new CorrelationEngine(triangle(), noPlacer, OPTIONS);
-    engine.applyBatch([
+    applyBatch(engine, [
       degradation('Z-1', T0),
       degradation('Z-2', T0),
       degradation('Z-3', T0)
     ]);
     const watermark = engine.watermark;
 
-    expect(engine.applyBatch([{ ...degradation('Z-4', T0 + 1000), zoneId: '' }])).toEqual([]);
+    expect(applyBatch(engine, [{ ...degradation('Z-4', T0 + 1000), zoneId: '' }])).toEqual([]);
     expect(engine.watermark).toBe(watermark);
   });
 
   it('returns nothing for an empty batch', () => {
     const engine = new CorrelationEngine(triangle(), noPlacer, OPTIONS);
-    expect(engine.applyBatch([])).toEqual([]);
+    expect(applyBatch(engine, [])).toEqual([]);
     expect(engine.stats().batches).toBe(0);
   });
 });
@@ -412,7 +435,7 @@ describe('CorrelationEngine — determinism', () => {
     const engine = new CorrelationEngine(triangle(), noPlacer, OPTIONS);
     const emitted: IncidentWireEvent[] = [];
     for (const batch of script) {
-      emitted.push(...engine.applyBatch(batch));
+      emitted.push(...applyBatch(engine, batch));
     }
     return emitted.map((event) => JSON.stringify(event)).join('\n');
   }
@@ -428,7 +451,7 @@ describe('CorrelationEngine — determinism', () => {
 
   it('mints ids in the documented shape', () => {
     const engine = new CorrelationEngine(triangle(), noPlacer, OPTIONS);
-    const [opened] = engine.applyBatch([
+    const [opened] = applyBatch(engine, [
       degradation('Z-1', T0),
       degradation('Z-2', T0),
       degradation('Z-3', T0)
@@ -465,7 +488,7 @@ describe('CorrelationEngine — over the real neighbour graph', () => {
     ]);
     const engine = new CorrelationEngine(graph, noPlacer, OPTIONS);
 
-    const events = engine.applyBatch([
+    const events = applyBatch(engine, [
       degradation('Z-1', T0, { latitude: 30.0, longitude: 70.0 }),
       degradation('Z-2', T0, { latitude: 30.02, longitude: 70.02 }),
       degradation('Z-3', T0, { latitude: 30.04, longitude: 70.01 }),
@@ -495,7 +518,7 @@ describe('CorrelationEngine — over the real neighbour graph', () => {
     };
     const engine = new CorrelationEngine(graph, placer, OPTIONS);
 
-    const events = engine.applyBatch([
+    const events = applyBatch(engine, [
       degradation('Z-1', T0, { latitude: 30.0, longitude: 70.0 }),
       degradation('Z-new-a', T0, { latitude: 30.02, longitude: 70.02 }),
       degradation('Z-new-b', T0, { latitude: 30.04, longitude: 70.01 })

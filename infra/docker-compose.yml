@@ -165,11 +165,12 @@ services:
       REDIS_PORT: "6379"
       REDIS_PASSWORD: ${REDIS_PASSWORD:-geopulse-dev}
       METRICS_PORT: "9093"
-      # The correlation geometry. These four decide whether the project's central claim is true
+      # The correlation geometry. These five decide whether the project's central claim is true
       # or false, so they are set explicitly here rather than left to defaults a benchmark would
       # have to guess at. `/health` prints them back.
       CORRELATION_WINDOW_MS: ${CORRELATION_WINDOW_MS:-120000}
       COMPACTION_INTERVAL_MS: ${COMPACTION_INTERVAL_MS:-5000}
+      RECONCILE_TICK_MS: ${RECONCILE_TICK_MS:-5000}
       INCIDENT_MIN_ZONES: ${INCIDENT_MIN_ZONES:-3}
       INCIDENT_CLOSE_GRACE_MS: ${INCIDENT_CLOSE_GRACE_MS:-60000}
       LOG_LEVEL: ${LOG_LEVEL:-info}

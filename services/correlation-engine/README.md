@@ -26,18 +26,18 @@ zone.degradations ──▶ correlation-engine ──▶ zone.incidents
 2. **Consume a batch** of degradations. Each message admits its zone to the correlation window
    (or releases it, if it is a recovery at `currentState: NORMAL`) and mirrors that into the
    connectivity structure.
-3. **Reconcile once per batch.** Sweep expired members, recompute the component partition, and
-   fold it into the live incident set. Out come `OPENED` / `GREW` / `SHRANK` / `MERGED` /
-   `CLOSED` events.
+3. **Reconcile on an event-time grid.** Every `RECONCILE_TICK_MS` of *event time*, sweep expired
+   members, recompute the component partition, and fold it into the live incident set. Out come
+   `OPENED` / `GREW` / `SHRANK` / `MERGED` / `CLOSED` events.
 4. **Publish, then write Redis, then resolve offsets** — in that order, and only that order.
 
-## Why `eachBatch` and not `eachMessage`
+## Why reconcile on an event-time grid
 
-**Because a regional fault is a burst, and the output should describe the fault, not the burst.**
+**Because the output should describe the fault, and should not depend on where Kafka drew a batch
+boundary.**
 
-In the reference scenario — 400 zones, seed 42 — a `regional-anomaly` degrades 62 zones within a
-few seconds of event time. Processed one message at a time, with a reconcile after each, that
-fault produces:
+In the reference scenario — 400 zones, seed 42 — a `regional-anomaly` degrades 62 zones over tens
+of seconds of event time. Reconciled after every message, that fault produces:
 
 ```
 OPENED  (3 members)
@@ -47,24 +47,60 @@ GREW    (5 members)
 GREW    (62 members)
 ```
 
-Sixty-two events published to Kafka, written to Redis and persisted to Postgres, each describing
-a state that stopped being true microseconds later. Processed as a batch, with one reconcile, the
-same fault produces:
+Sixty-two events published to Kafka, written to Redis and persisted to Postgres, each describing a
+state that stopped being true moments later. Reconciled on a grid, the same fault produces a
+handful of consolidated events — in the limit, one:
 
 ```
 OPENED  (62 members)
 ```
 
-This is **not** a throughput optimisation that happens to change the output. The batched output is
-*better*: a lifecycle stream is meant to be read by a person, and one consolidated update per
-burst is the honest description of what happened. Throughput is a side effect.
+This is **not** a throughput optimisation that happens to change the output. The consolidated
+output is *better*: a lifecycle stream is meant to be read by a person, and one update per tick is
+the honest description of what happened. Throughput is a side effect.
 
-The cost is real and worth stating: reconciling per batch means an incident's `openedAt` — and
-therefore its id, which is `SHA-256(scheme | openedAt | seed members)` — depends on where batch
-boundaries fell. Given a fixed message order *and* a fixed batching the output is byte-identical,
-which is asserted in `correlationEngine.test.ts` and is what the eval harness replays. Two live
-runs over the same stream can name the same incident differently. The full argument, and the
-alternatives that lost, are in [`docs/adr/ADR-004`](../../docs/adr/ADR-004-coarse-cell-partitioning.md).
+### It used to reconcile once per batch, and the first live run showed why that was wrong
+
+The original design (ADR-004, as written) put one reconcile at the end of each `eachBatch` call,
+on the argument that a burst arrives as a batch. The first end-to-end run measured what actually
+arrives:
+
+```
+consumer: { batches: 68, messages: 70 }
+```
+
+**About one message per batch.** Degradations are rare enough, and the pipeline fast enough, that
+kafkajs hands them over as they arrive. Per-batch reconciling therefore collapsed into per-message
+reconciling *precisely when the system was healthy*, and consolidated unboundedly only when it was
+lagging — delivering none of the benefit it was chosen for while carrying all of its cost.
+
+That cost was a caveat on determinism. `openedAt` is in the incident id preimage
+(`SHA-256(scheme | openedAt | seed members)`, ADR-003) and `openedAt` is the reconcile watermark,
+so an incident's *name* depended on a broker fetch artefact. Output was byte-identical only for a
+fixed batching, which is not a property of the data.
+
+On the grid, a boundary `B` is reconciled when the first message with `eventTime > B` arrives, so
+that reconcile sees exactly the messages at or before `B`. `openedAt` always lands on a tick
+multiple, and the whole output becomes a function of the message stream alone —
+`reconcileGrid.test.ts` runs the same twelve messages under four different batchings and asserts
+byte-identical output, ids included.
+
+`eachBatch` stays: it is still the right consumer API, because the batch is the unit of offset
+resolution and of dispatch. It is simply no longer the unit of reconciliation.
+
+**What it costs**, stated plainly: a component that forms and dissolves entirely inside one tick
+is never seen. That was true before too — it was just a broker artefact instead of a stated
+interval. `RECONCILE_TICK_MS` is the resolution at which this system is willing to describe
+change, and at 5 s against a 120 s window it is two orders of magnitude finer than the thing being
+measured.
+
+**End of stream.** A boundary is completed by a *later* message, so the final interval of a bounded
+stream would never be announced. `CorrelationEngine.flush()` closes it out — on the grid, so an
+end-of-stream flush cannot put an off-grid value into an id. A graceful shutdown calls it; so must
+the eval harness.
+
+The full argument, and the alternatives that lost, are in
+[`docs/adr/ADR-004`](../../docs/adr/ADR-004-coarse-cell-partitioning.md) and its amendment.
 
 ## Why a separate service
 
@@ -149,6 +185,7 @@ from a failed flush would be lost silently. They are held until a flush succeeds
 | `CORRELATION_MAX_BATCH_SIZE` | `1000` | Messages folded per reconcile. Larger slices consolidate more and take longer between heartbeats. |
 | `CORRELATION_WINDOW_MS` | `120000` | How long a degraded zone stays an active member. |
 | `COMPACTION_INTERVAL_MS` | `5000` | Event-time cadence for the expiry sweep. Must be below the window. |
+| `RECONCILE_TICK_MS` | `COMPACTION_INTERVAL_MS` | Event-time grid the lifecycle reconciles on. Every incident's `openedAt` is a multiple of it, so changing it changes every incident id. Must be below the window. |
 | `INCIDENT_MIN_ZONES` | `3` | Members a component needs to be an incident. **This is the threshold that makes the project's claim true or false** — at 1, nothing has been collapsed. |
 | `INCIDENT_CLOSE_GRACE_MS` | `60000` | How long an incident may sit below the minimum before closing. |
 | `ZONE_REFRESH_INTERVAL_MS` | `60000` | Registry poll interval. 0 disables. |

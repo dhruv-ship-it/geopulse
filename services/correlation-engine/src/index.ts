@@ -46,7 +46,8 @@ async function main(): Promise<void> {
       windowMs: config.correlationWindowMs,
       compactionIntervalMs: config.compactionIntervalMs,
       minZones: config.incidentMinZones,
-      closeGraceMs: config.incidentCloseGraceMs
+      closeGraceMs: config.incidentCloseGraceMs,
+      reconcileTickMs: config.reconcileTickMs
     });
 
     const store = new IncidentStore(redisClient.getClient(), {
@@ -99,6 +100,22 @@ async function main(): Promise<void> {
       registry.stopBackgroundRefresh();
       // Consumer first: stop taking new work before tearing down what processes it.
       await consumer.disconnect();
+
+      // Then close out the final partial tick. The grid reconciles a boundary when a later
+      // message crosses it, and on shutdown there is no later message — so without this the
+      // last interval's incidents are never announced. Dispatch failures are logged rather
+      // than rethrown: there are no offsets left to withhold at this point, and failing the
+      // shutdown would leave the process alive with its consumer already gone.
+      try {
+        const final = engine.flush();
+        if (final.length > 0) {
+          await dispatcher.dispatch(final);
+          logger.info({ events: final.length }, 'Flushed the final reconcile tick');
+        }
+      } catch (err) {
+        logger.error({ error: err }, 'Failed to flush the final tick on shutdown');
+      }
+
       await producer.disconnect();
       await redisClient.disconnect();
       metricsServer?.close();

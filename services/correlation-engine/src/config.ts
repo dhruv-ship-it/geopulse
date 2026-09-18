@@ -35,8 +35,18 @@ export interface CorrelationEngineConfig {
 
   /** How long a zone stays an active member after its most recent degradation. */
   correlationWindowMs: number;
-  /** Event-time cadence on which the window sweeps and the lifecycle reconciles. */
+  /** Event-time cadence on which the window sweeps. */
   compactionIntervalMs: number;
+  /**
+   * Event-time grid the lifecycle reconciles on. Defaults to `compactionIntervalMs`.
+   *
+   * This is the resolution at which the system is willing to describe change, and it is what
+   * makes incident ids independent of Kafka batching: `openedAt` is in the id preimage (ADR-003)
+   * and now always lands on a multiple of this. Raising it consolidates more aggressively and
+   * loses components that form and dissolve inside one tick; lowering it does the reverse.
+   * Changing it changes every incident id and invalidates measured numbers taken before it.
+   */
+  reconcileTickMs: number;
   /** Members a component needs before it is an incident at all. */
   incidentMinZones: number;
   /** How long an incident may sit below the minimum before it closes. */
@@ -48,6 +58,12 @@ export interface CorrelationEngineConfig {
   closedIncidentTtlSeconds: number;
 
   metricsPort: number;
+}
+
+/** The compaction interval when it is a usable cadence, and the standalone default when not. */
+function reconcileDefault(env: NodeJS.ProcessEnv): number {
+  const compaction = intFromEnv(env, 'COMPACTION_INTERVAL_MS', 5000);
+  return compaction > 0 ? compaction : 5000;
 }
 
 function intFromEnv(env: NodeJS.ProcessEnv, name: string, fallback: number): number {
@@ -87,6 +103,11 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): CorrelationEng
 
     correlationWindowMs: intFromEnv(env, 'CORRELATION_WINDOW_MS', 120000),
     compactionIntervalMs: intFromEnv(env, 'COMPACTION_INTERVAL_MS', 5000),
+    // Defaults to the compaction interval, except that a compaction interval of 0 is a legal
+    // and meaningful setting — "sweep on every batch, exact expiry" — and is not a statement
+    // about how often to *announce* anything. A grid of 0 would not be a cadence at all, so the
+    // standalone default applies there.
+    reconcileTickMs: intFromEnv(env, 'RECONCILE_TICK_MS', reconcileDefault(env)),
     incidentMinZones: intFromEnv(env, 'INCIDENT_MIN_ZONES', 3),
     incidentCloseGraceMs: intFromEnv(env, 'INCIDENT_CLOSE_GRACE_MS', 60000),
 
@@ -114,6 +135,17 @@ function validate(config: CorrelationEngineConfig): void {
   if (config.compactionIntervalMs >= config.correlationWindowMs) {
     throw new Error(
       `COMPACTION_INTERVAL_MS (${config.compactionIntervalMs}) must be below ` +
+        `CORRELATION_WINDOW_MS (${config.correlationWindowMs})`
+    );
+  }
+  if (config.reconcileTickMs <= 0) {
+    throw new Error(`RECONCILE_TICK_MS must be positive, got ${config.reconcileTickMs}`);
+  }
+  // Same argument as the compaction interval, one level up: a reconcile grid as coarse as the
+  // window means an incident can be born and expire without ever being described.
+  if (config.reconcileTickMs >= config.correlationWindowMs) {
+    throw new Error(
+      `RECONCILE_TICK_MS (${config.reconcileTickMs}) must be below ` +
         `CORRELATION_WINDOW_MS (${config.correlationWindowMs})`
     );
   }
@@ -148,6 +180,7 @@ function validate(config: CorrelationEngineConfig): void {
 export function describeConfig(config: CorrelationEngineConfig): string {
   return (
     `window=${config.correlationWindowMs}ms compaction=${config.compactionIntervalMs}ms ` +
+    `reconcileTick=${config.reconcileTickMs}ms ` +
     `minZones=${config.incidentMinZones} closeGrace=${config.incidentCloseGraceMs}ms ` +
     `maxBatch=${config.maxBatchSize}`
   );

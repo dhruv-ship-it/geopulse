@@ -36,10 +36,19 @@ export interface CorrelationEngineOptions {
   compactionIntervalMs: number;
   minZones: number;
   closeGraceMs: number;
+  /**
+   * Event-time grid the lifecycle reconciles on. Defaults to `compactionIntervalMs`, which is
+   * what `config.ts` has always claimed this cadence is. See `applyBatch`.
+   */
+  reconcileTickMs?: number;
 }
 
 export interface CorrelationEngineStats {
   batches: number;
+  /** Reconciles run, which is a count of event-time ticks crossed, not of batches. */
+  ticks: number;
+  /** Ticks fast-forwarded because there was provably nothing to reconcile. See `applyBatch`. */
+  ticksSkipped: number;
   degradations: number;
   recoveries: number;
   rejected: number;
@@ -92,32 +101,45 @@ const EMPTY_FOOTPRINT: IncidentFootprint = {
  *
  * Per message, in offset order: place the zone, then either admit it to the correlation window
  * (a degradation) or release it (a recovery), mirroring that into the connectivity structure.
- * Once per batch: tick the window — which sweeps on its own event-time cadence — compact the
- * expiries into connectivity, and reconcile the resulting partition into incidents.
+ * Then, whenever the message stream crosses a boundary of the reconcile grid: tick the window,
+ * compact the expiries into connectivity, and reconcile the resulting partition into incidents.
  *
  * This is the same call sequence as `src/core/__tests__/support/lifecycleDriver.ts`, which is
  * the sequence 2,500 property-test sequences and 156,773 invariant checks were run against. The
  * one difference is the reconcile cadence: the driver reconciles after *every* event, which is
- * the harshest schedule, and this reconciles once per batch.
+ * the harshest schedule, and this reconciles on a fixed event-time grid.
  *
- * ## What batching costs, stated plainly
+ * ## The reconcile grid, and the two things it fixes
  *
- * Reconciling per batch rather than per message is why `eachBatch` is used at all (see the
- * README), and it is not free. Incident ids are `SHA-256(scheme | openedAt | seed members)`
- * (ADR-003), and `openedAt` is the watermark of the reconcile that opened the incident. A
- * coarser reconcile cadence therefore changes *which* watermark an incident opens at, and can
- * change its seed set — a component that formed and dissolved entirely inside one batch is never
- * seen at all, and one that grew from three to five members inside a batch opens with five. So:
+ * Reconciles happen at multiples of `reconcileTickMs` of **event time** — not once per Kafka
+ * batch, which is what this did until the first end-to-end run. A boundary `B` is reconciled
+ * when the first message with `eventTime > B` arrives, so it sees exactly the messages at or
+ * before `B` and no others, whatever the broker did with fetch sizes.
  *
- * - Given a fixed message order **and a fixed batching**, the output is byte-identical. That is
- *   what `correlationEngine.test.ts` asserts, and it is what the eval harness replays.
- * - Two live runs over the same stream can differ in incident ids, because batch boundaries are
- *   a broker fetch artefact. The set of incidents, their membership and their lifecycle do not
- *   differ in kind; the names do.
+ * **It removes a caveat on determinism.** Incident ids are `SHA-256(scheme | openedAt | seed
+ * members)` (ADR-003), and `openedAt` is the watermark of the reconcile that opened the incident.
+ * Under a per-batch cadence that watermark was wherever Kafka happened to draw a batch boundary,
+ * so two live runs over the same stream could name the same incident differently — output was
+ * byte-identical only for a *fixed batching*, which is not a property of the data. On the grid,
+ * `openedAt` is always a multiple of `reconcileTickMs` and the id is a function of the message
+ * stream alone. `CLAUDE.md` rule 3 treats determinism as load-bearing, and this is what it costs
+ * to actually have it.
  *
- * That trade is the right one for a product whose output is meant for a human — one consolidated
- * update per burst beats sixty — and it is stated here rather than discovered later, because
- * "why do the ids differ between runs" is otherwise a genuinely alarming question.
+ * **It also delivers the consolidation `eachBatch` was chosen for, which the per-batch cadence
+ * did not.** The argument for batching (ADR-004, and the README) is that a regional fault is a
+ * burst of sixty-two degradations and should produce one `OPENED` with sixty-two members rather
+ * than an `OPENED` and sixty-one `GREW`s. That argument silently assumed the consumer was
+ * *behind*. Measured on the live stack it is not: the first end-to-end run reported **70 messages
+ * across 68 batches** — about one message per batch — because degradations are rare enough that
+ * kafkajs hands them over as they arrive. Per-batch reconciling therefore degenerated to
+ * per-message reconciling exactly when the system was healthy, and consolidated unboundedly only
+ * when it was lagging. A fixed event-time grid consolidates the same way in both cases.
+ *
+ * What the grid costs is that a component forming and dissolving entirely inside one tick is
+ * never seen. That is the same trade as before, but now it is a stated interval rather than a
+ * broker artefact: `reconcileTickMs` is the resolution at which this system is willing to
+ * describe change, and at 5 s against a 120 s window it is two orders of magnitude finer than
+ * the thing being measured.
  *
  * ## Event time only
  *
@@ -136,7 +158,30 @@ export class CorrelationEngine {
   private readonly observations = new Map<string, ZoneObservation>();
   private readonly enrichment = new Map<string, IncidentEnrichment>();
 
+  private readonly reconcileTickMs: number;
+
+  /**
+   * The next grid boundary that can be reconciled, or null before the first message.
+   *
+   * Always a multiple of `reconcileTickMs`, and advanced only by message event times — never by
+   * a batch boundary and never by a clock. This one field is what makes incident ids a function
+   * of the stream rather than of the broker's fetch behaviour.
+   */
+  private pendingTickAt: number | null = null;
+
+  /**
+   * Whether any message has been folded since the last reconcile.
+   *
+   * Makes `flush()` idempotent: with nothing folded there is nothing to close, so a second flush
+   * does not invent another tick's worth of event time. Without this, repeated flushes on a quiet
+   * stream would march the watermark forward on their own — a clock by the back door, which is
+   * exactly what rule 3 forbids.
+   */
+  private foldedSinceTick = false;
+
   private batches = 0;
+  private ticks = 0;
+  private ticksSkipped = 0;
   private degradations = 0;
   private recoveries = 0;
   private rejected = 0;
@@ -157,13 +202,29 @@ export class CorrelationEngine {
       minZones: options.minZones,
       closeGraceMs: options.closeGraceMs
     });
+
+    // Defaults to the compaction cadence, which is what `config.ts` has always described this
+    // number as: "the event-time cadence on which the window sweeps and the lifecycle
+    // reconciles". Only the first half of that was ever true. Separable via RECONCILE_TICK_MS
+    // because a deployment might want to sweep more often than it announces, but one knob is the
+    // honest default for two halves of the same decision.
+    this.reconcileTickMs = options.reconcileTickMs ?? options.compactionIntervalMs;
+    if (!Number.isFinite(this.reconcileTickMs) || this.reconcileTickMs <= 0) {
+      throw new Error(`reconcileTickMs must be positive, got ${this.reconcileTickMs}`);
+    }
   }
 
   /**
-   * Fold one batch of degradations in and return the incident events it produced.
+   * Fold one batch of degradations in and return the incident events the grid boundaries it
+   * crossed produced.
    *
    * An empty batch returns nothing and changes nothing: with no message there is no event time,
-   * and reconciling at the old watermark would be a no-op anyway.
+   * so nothing can have crossed a boundary.
+   *
+   * Note what this deliberately does **not** do: reconcile at the end. A batch that arrives
+   * entirely inside one tick produces no events at all, and its effects are announced by whichever
+   * later batch carries the stream past the boundary. That is the whole point — the output is a
+   * function of the messages, not of where the fetch happened to stop.
    */
   applyBatch(messages: readonly ZoneDegradation[]): IncidentWireEvent[] {
     if (messages.length === 0) {
@@ -173,16 +234,18 @@ export class CorrelationEngine {
     this.batches++;
     degradationBatchSize.observe(messages.length);
 
-    let watermark = this.window.watermark;
-    let sawMessage = false;
+    const events: IncidentEvent[] = [];
 
     for (const message of messages) {
       if (!this.isUsable(message)) {
         continue;
       }
-      sawMessage = true;
-      watermark = Math.max(watermark, message.eventTime);
 
+      // Complete every grid boundary this message lies past, BEFORE folding it in, so that the
+      // reconcile at boundary B sees exactly the messages at or before B and no others.
+      this.advanceTo(message.eventTime, events);
+
+      this.foldedSinceTick = true;
       this.placer.observe(message);
 
       if (message.currentState === 'NORMAL') {
@@ -216,27 +279,110 @@ export class CorrelationEngine {
       }
     }
 
-    if (!sawMessage) {
+    this.syncGauges();
+    return this.toWire(events);
+  }
+
+  /**
+   * Reconcile every grid boundary up to the current watermark, and return what that produced.
+   *
+   * For the end of a bounded stream: an offline replay, or a graceful shutdown. Live, the next
+   * message completes a boundary; at the end of a run there is no next message, so the last
+   * boundaries would never complete and the final `CLOSED` events would never be emitted.
+   *
+   * It reconciles at grid boundaries only — never at the watermark itself. Reconciling at an
+   * arbitrary instant would put a non-grid value into an incident id preimage and reintroduce, at
+   * the end of every run, exactly the non-determinism the grid removes. So after catching up to
+   * the watermark it runs **one** further tick, at the boundary that closes the interval the last
+   * message fell in. That boundary is a multiple of the tick and is a function of the stream's
+   * own last event time, so two replays agree on it.
+   *
+   * The price is a few milliseconds of invented event time: that final boundary can be up to one
+   * tick past the last message, so a member whose window expires inside that gap is expired
+   * without data saying so. At the end of a stream that has already stopped, calling a member
+   * expired slightly early is the correct reading of "there is no more evidence" — and leaving
+   * the incident open forever, which is the alternative, is not.
+   */
+  flush(): IncidentWireEvent[] {
+    if (this.pendingTickAt === null) {
       return [];
     }
+    const events: IncidentEvent[] = [];
+    this.runTicksUpTo(this.window.watermark, events);
 
+    if (this.pendingTickAt !== null && this.foldedSinceTick) {
+      const at = this.pendingTickAt;
+      this.pendingTickAt = at + this.reconcileTickMs;
+      this.runTick(at, events);
+    }
+
+    this.syncGauges();
+    return this.toWire(events);
+  }
+
+  /**
+   * Complete every boundary strictly before `eventTime`, then arm the next one.
+   *
+   * On the very first message the grid is anchored at `ceil(eventTime / tick)` — the boundary
+   * closing the interval that message falls in. Anchoring on a *multiple of the tick* rather than
+   * on the first message's own timestamp is what makes two runs that start at different points —
+   * a replay from the beginning and a consumer joining mid-stream — agree about where the
+   * boundaries are, and therefore agree about incident ids.
+   */
+  private advanceTo(eventTime: number, into: IncidentEvent[]): void {
+    if (this.pendingTickAt === null) {
+      this.pendingTickAt = Math.ceil(eventTime / this.reconcileTickMs) * this.reconcileTickMs;
+      return;
+    }
+    // Strictly before: a message landing exactly on a boundary belongs to that boundary's
+    // interval, so the boundary is not complete until something after it arrives.
+    this.runTicksUpTo(eventTime - 1, into);
+  }
+
+  /** Reconcile every armed boundary at or before `limit`. */
+  private runTicksUpTo(limit: number, into: IncidentEvent[]): void {
+    while (this.pendingTickAt !== null && this.pendingTickAt <= limit) {
+      // Nothing active and nothing open means every intervening reconcile would emit nothing and
+      // change nothing, so the grid can be fast-forwarded. An optimisation with no observable
+      // effect — it is only sound because a reconcile over an empty partition with no live
+      // incidents is provably a no-op — and it is what keeps a four-hour quiet stretch from
+      // costing 2,880 empty reconciles on a replay.
+      if (this.window.size === 0 && this.lifecycle.size === 0) {
+        const target = Math.floor(limit / this.reconcileTickMs) * this.reconcileTickMs;
+        if (target > this.pendingTickAt) {
+          this.ticksSkipped += (target - this.pendingTickAt) / this.reconcileTickMs;
+          this.pendingTickAt = target;
+        }
+      }
+
+      const at = this.pendingTickAt;
+      this.pendingTickAt = at + this.reconcileTickMs;
+      this.runTick(at, into);
+    }
+  }
+
+  private runTick(at: number, into: IncidentEvent[]): void {
     // The only wall-clock read in the engine, and it decides nothing: it is a stopwatch around
     // the compaction, and its value reaches a histogram and nowhere else. Rule 3 in CLAUDE.md
     // forbids a clock *deciding* anything on this path; `replays byte-identically` in
     // `correlationEngine.test.ts` is the guard that it does not.
     const startedAt = Date.now();
-    const expired = this.window.tick(watermark);
+    const expired = this.window.tick(at);
     if (expired.length > 0) {
       this.connectivity.compact(expired);
       for (const zoneId of expired) {
         this.observations.delete(zoneId);
       }
     }
-    const events = this.lifecycle.reconcile(this.connectivity.components(), watermark);
+    for (const event of this.lifecycle.reconcile(this.connectivity.components(), at)) {
+      into.push(event);
+    }
     compactionDurationMs.observe(Date.now() - startedAt);
+    this.foldedSinceTick = false;
+    this.ticks++;
+  }
 
-    this.syncGauges();
-
+  private toWire(events: readonly IncidentEvent[]): IncidentWireEvent[] {
     const wire = events.map((event) => this.toWireEvent(event));
     this.emitted += wire.length;
     return wire;
@@ -254,6 +400,8 @@ export class CorrelationEngine {
   stats(): CorrelationEngineStats {
     return {
       batches: this.batches,
+      ticks: this.ticks,
+      ticksSkipped: this.ticksSkipped,
       degradations: this.degradations,
       recoveries: this.recoveries,
       rejected: this.rejected,

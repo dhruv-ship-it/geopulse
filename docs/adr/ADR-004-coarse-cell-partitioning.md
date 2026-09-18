@@ -147,3 +147,115 @@ with the multi-consumer design rather than bolted onto a single-consumer Phase 1
 evicted mid-batch, which redelivers the work to somebody else and presents as a slow consumer
 getting slower. The batch is sliced at `CORRELATION_MAX_BATCH_SIZE` with a heartbeat between
 slices.
+
+---
+
+# Amendment (WP3, S7) — reconcile on an event-time grid, not per batch
+
+## Status
+
+Accepted. The keying decision above is unchanged. The *cadence* half of this ADR is replaced.
+
+## Context
+
+The original decision reconciled the incident lifecycle once per Kafka batch, and stated its own
+cost honestly: `openedAt` is in the incident id preimage (ADR-003) and `openedAt` is the watermark
+of the reconcile that opened the incident, so a batch boundary decides an incident's name. Output
+was byte-identical for a fixed message order **and a fixed batching** — and batching is a broker
+fetch artefact, not a property of the data. Two live runs over the same stream could therefore
+name the same incident differently. `CLAUDE.md` rule 3 treats determinism as load-bearing, so
+that caveat was flagged for a decision once real batch sizes were visible.
+
+They now are, and they say something the original ADR did not anticipate.
+
+## What the live run showed
+
+First full end-to-end run, `SCENARIO=regional-anomaly`, 400 zones, seed 42, from the correlation
+engine's own `/health`:
+
+```
+consumer: { batches: 68, messages: 70 }
+incidents: { opened: 8, grew: 15, merged: 5, closed: 5 }
+```
+
+**About one message per batch.** The argument for `eachBatch` — that a regional fault is a burst
+of sixty-two degradations and should produce one `OPENED` with sixty-two members rather than an
+`OPENED` and sixty-one `GREW`s — silently assumed the consumer was *behind*. It is not. Zones
+cross their thresholds over tens of seconds of event time as the fault ramps, the pipeline keeps
+up, and kafkajs hands degradations over as they arrive.
+
+So per-batch reconciling **degenerated to per-message reconciling exactly when the system was
+healthy**, and consolidated unboundedly only when it was lagging. It delivered none of the benefit
+it was chosen for while carrying all of its determinism cost. The incident churn in that run — 8
+opened, 15 grew, 5 merged for one fault — is the churn batching was supposed to prevent.
+
+## Decision
+
+Reconcile at multiples of `RECONCILE_TICK_MS` of **event time** (default: `COMPACTION_INTERVAL_MS`
+= 5 s). A boundary `B` is reconciled when the first message with `eventTime > B` arrives, so the
+reconcile at `B` sees exactly the messages at or before `B`, whatever the broker did.
+
+`eachBatch` stays. It is still the right consumer API — the batch is the unit of offset resolution
+and of dispatch, and the heartbeat and stale-batch handling above are unchanged. What changes is
+that the batch is no longer the unit of *reconciliation*.
+
+Two things follow:
+
+- **`openedAt` is always a multiple of the tick**, so an incident id is a function of the message
+  stream alone. `reconcileGrid.test.ts` runs the same twelve messages under four batchings — one
+  at a time, all at once, and two irregular rhythms — and asserts byte-identical output including
+  ids.
+- **Consolidation is the same whether the consumer is caught up or behind.** A tick's worth of
+  degradations becomes one incident event either way.
+
+### The anchor is the grid, not the first message
+
+Boundaries are multiples of the tick in absolute event time, so a replay from the beginning and a
+consumer joining mid-stream agree about where they are. Anchoring on the first message's own
+timestamp would have reintroduced the same class of bug one level up.
+
+### Flush, and why it is also on the grid
+
+A boundary is completed by a *later* message, so at the end of a bounded stream the last interval
+never completes and its incidents are never announced. `CorrelationEngine.flush()` exists for
+that: a graceful shutdown calls it, and the eval harness will. It catches up to the watermark and
+then runs one further tick at the boundary closing the final interval — a tick multiple, so an
+end-of-stream flush cannot put an off-grid value into an id preimage. The price is a few
+milliseconds of invented event time: that boundary can be up to one tick past the last message, so
+a member whose window lapses inside the gap is expired without data saying so. At the end of a
+stream that has stopped, reading "no more evidence" as expiry is right, and the alternative is an
+incident that never closes.
+
+`flush()` is idempotent — it tracks whether anything has been folded since the last tick — so it
+cannot be used to march the watermark forward, which would be a clock by the back door.
+
+### The empty fast-forward
+
+A four-hour replay with a quiet stretch would otherwise run 2,880 reconciles over nothing. When
+the correlation window is empty *and* no incident is live, a reconcile is provably a no-op, so the
+grid skips straight to the boundary before the next message. Counted as `ticksSkipped`, because an
+optimisation that claims to have no observable effect should be measurable.
+
+## What this costs
+
+A component that forms and dissolves entirely inside one tick is never seen. That was true before
+too — it was just a broker artefact rather than a stated interval. `RECONCILE_TICK_MS` is now an
+explicit statement of the resolution at which this system is willing to describe change, and at
+5 s against a 120 s correlation window it is two orders of magnitude finer than the thing being
+measured.
+
+It also changes what a close time *means*, for the better. Under the per-batch cadence, an
+incident whose grace period expired at T was reported closed at whatever watermark the next
+unrelated message happened to carry. On the grid it closes at the first boundary past T, because
+the gap is crossed one boundary at a time. The close is dated to when the incident ended rather
+than to who reported next.
+
+## Consequences
+
+- Every incident id in the system changes. Nothing had been measured against the old ones.
+- The eval harness (WP6b) must call `flush()` at the end of a replay, or lose the final interval.
+- `RECONCILE_TICK_MS` joins `CORRELATION_WINDOW_MS`, `COMPACTION_INTERVAL_MS`, `INCIDENT_MIN_ZONES`
+  and `INCIDENT_CLOSE_GRACE_MS` in the geometry line `describeConfig` prints, so a benchmark records
+  it next to its numbers (rule 1).
+- The determinism claim loses its caveat: output is now byte-identical for a fixed message order,
+  full stop.
