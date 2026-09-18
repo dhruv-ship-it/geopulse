@@ -12,6 +12,12 @@
 # Brings the whole stack up from scratch (including a fresh Postgres volume, so the row counts
 # are this run's and not an accumulation), waits for the simulator to finish its four simulated
 # hours, then reports what each stage of the pipeline saw.
+#
+# DO NOT run the GEOPULSE_INTEGRATION test suites while this is running. They produce their own
+# degradations and incident events onto the same topics, against the same database, and every
+# count below would include them — an integration incident of 3 fabricated zones is
+# indistinguishable here from a real one. Learned the hard way; the contamination is silent and
+# looks exactly like a result.
 set -u
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"

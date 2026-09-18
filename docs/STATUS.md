@@ -12,7 +12,7 @@
 | **Phase** | Phase 1 — Spatiotemporal Incident Correlation |
 | **Active work package** | S7 done — **WP3 is complete**. Items 6 and 8 landed (Postgres incident persistence; `stream-processor` emits `ZoneDegradation` keyed by coarse cell, recoveries included), every service is containerised, and `docker compose up` brings up the whole stack. **The acceptance criterion passed against live infrastructure: one injected regional anomaly, 62 degraded zones, one incident.** WP6b is now fully unblocked. |
 | **Last updated** | 2026-09-18 |
-| **Last commit at time of writing** | `8944267` |
+| **Last commit at time of writing** | `74de429` |
 | **Blocked on** | Nothing. Next is WP6b (the eval harness), which must call `CorrelationEngine.flush()` at the end of a replay or lose the final reconcile tick. |
 
 **Decisions locked in (do not re-litigate without the owner):**

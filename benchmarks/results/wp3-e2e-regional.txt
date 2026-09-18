@@ -1,6 +1,6 @@
 GeoPulse end-to-end acceptance — WP3
-generated: 2026-09-18T10:47:11Z
-commit:    8944267
+generated: 2026-09-18T10:57:48Z
+commit:    74de429
 scenario:  regional-anomaly, 400 zones, seed 42, speed 60x
 
 ## Bringing the stack up from scratch
@@ -8,24 +8,24 @@ scenario:  regional-anomaly, 400 zones, seed 42, speed 60x
    Network geopulse_default  Created
    Volume geopulse_postgres_data  Created
    Container geopulse-zookeeper  Created
-   Container geopulse-redis  Created
    Container geopulse-postgres  Created
+   Container geopulse-redis  Created
    Container geopulse-kafka  Created
    Container geopulse-api  Created
    Container geopulse-kafka-bootstrap  Created
    Container geopulse-stream-processor  Created
-   Container geopulse-correlation-engine  Created
    Container geopulse-alert-processor  Created
    Container geopulse-simulator  Created
+   Container geopulse-correlation-engine  Created
    Container geopulse-redis  Started
    Container geopulse-postgres  Started
    Container geopulse-zookeeper  Started
    Container geopulse-api  Started
    Container geopulse-kafka  Started
    Container geopulse-kafka-bootstrap  Started
-   Container geopulse-stream-processor  Started
-   Container geopulse-alert-processor  Started
    Container geopulse-correlation-engine  Started
+   Container geopulse-stream-processor  Started
    Container geopulse-simulator  Started
+   Container geopulse-alert-processor  Started
 
 ## Waiting for the simulator to finish (timeout 3600s)
