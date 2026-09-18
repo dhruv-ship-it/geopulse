@@ -10,10 +10,10 @@
 | Field | Value |
 |---|---|
 | **Phase** | Phase 1 — Spatiotemporal Incident Correlation |
-| **Active work package** | S5 done — **WP2 complete** (WP2a: window + connectivity + oracle + differential fuzz; WP2b: `IncidentLifecycle`, deterministic ids, merge/split policy, property tests). **WP3 is next**: wire the core into a real service. WP6b still waits on WP3. |
+| **Active work package** | S6 done — **WP3 is partially complete**: items 1–5 and 7 built (the `correlation-engine` service, `eachBatch` consumer, zone registry, `zone.incidents` producer, Redis incident state, metrics). **Items 6 and 8 are deliberately not started** — Postgres persistence and the `stream-processor` producer change. Nothing produces to `zone.degradations` yet, so the WP3 end-to-end acceptance criterion is *not* met. WP6b still waits on WP3. |
 | **Last updated** | 2026-09-18 |
-| **Last commit at time of writing** | `a5276db` |
-| **Blocked on** | **Nothing.** The correlation core is complete: a partition proven against its oracle, and incidents proven against their invariants. WP3 puts Kafka, Redis and Postgres around it. |
+| **Last commit at time of writing** | `5515273` |
+| **Blocked on** | **Nothing, but WP3 cannot be closed until item 8 lands.** The engine is built and tested in isolation; until `stream-processor` emits `ZoneDegradation` to `zone.degradations`, there is nothing on the topic and the engine idles. Docker was not available on the machine during S6, so nothing in WP3 has yet been run against a live broker. |
 
 **Decisions locked in (do not re-litigate without the owner):**
 - Scope is idea ① (spatial correlation) only. Ideas ②–⑤ are deferred to `06-FUTURE-PHASES.md`.
@@ -32,11 +32,11 @@
 | WP1 | Spatial layer (H3 neighbour graph) | ☑ Done | `@geopulse/spatial` — `NeighbourGraph` plus the cells module moved out of stream-processor. All three acceptance criteria met: lookup flat at 0.58→1.03 µs across 1k→100k zones against 39.6→4630.7 µs for a naive scan; antimeridian, polar and pentagon tests; ADR-001. Understanding checkpoint still owed. |
 | WP2a | Correlation core — window + connectivity | ☑ Done | `CorrelationWindow`, `TimeAwareConnectivity` (union-find + local rebuild), `NaiveConnectivity` (the oracle), and the differential fuzz. Acceptance met: **11,000 sequences / 551,871 operations, 0 divergences**. ADR-002. Understanding checkpoint still owed. |
 | WP2b | Correlation core — `IncidentLifecycle` | ☑ Done | OPENED / GREW / MERGED / SHRANK / CLOSED, `DRAINING` as the third status, SHA-256 incident ids, merge by age, split by inheritance. Acceptance met: **2,500 property sequences / 156,773 invariant checks, 0 violations**, and a byte-identical replay over 1,000 of them. 100% statements and branches on the module. ADR-003. Understanding checkpoint still owed. |
-| WP3 | `correlation-engine` service | ☐ Not started | **Next.** |
+| WP3 | `correlation-engine` service | ◐ In progress | Items 1–5 and 7 done: service scaffolding to the existing conventions, `eachBatch` consumer with hand-resolved offsets, zone registry with three discovery paths, `IncidentWireEvent` producer keyed by coarse cell, Redis `incident:<id>` / `incidents:active` / `incidents:geo`, and all eight spec metrics plus nine that each name the claim they falsify. ADR-004. **267 tests, 97.09% stmts / 96.47% branches.** Items 6 (Postgres) and 8 (`stream-processor` producer) remain; the end-to-end acceptance criterion is untested and `docker-compose` still brings up infra only. |
 | WP4 | Propagation vector | ☐ Not started | |
 | WP5 | API + live map UI | ☐ Not started | |
 | WP6a | Simulator ground truth | ☑ Done | All four scenarios inject, all four emit §2-schema labels, determinism asserted byte-for-byte, labels verified against the real state machine. ADR-006. Understanding checkpoint still owed. |
-| WP6b | Eval harness + benchmarks | ☐ Not started | **Unblocked** as of S2c. Still needs WP3 (the correlation engine) before there are incidents to score. |
+| WP6b | Eval harness + benchmarks | ☐ Not started | **Unblocked** as of S2c. The correlation engine now exists and is replayable without the stack (`CorrelationEngine.applyBatch` is I/O-free), so the harness can be built against it before WP3 item 8 lands. Live scoring still needs item 8. |
 | WP7 | Docs, ADRs, README, resume | ☐ Not started | |
 
 Status legend: ☐ not started · ◐ in progress · ☑ done (acceptance criteria met) · ⚠ done but
@@ -55,7 +55,7 @@ truly complete when both are ticked.
 | WP1 | ☐ — questions at the end of the S3 log entry; ADR-001 answers most of them in prose, so answer closed-book first | |
 | WP2a | ☐ — questions at the end of the S4 log entry; ADR-002 answers several in prose, so answer closed-book first | |
 | WP2b | ☐ — questions at the end of the S5 log entry; ADR-003 answers most of them in prose, so answer closed-book first | |
-| WP3 | ☐ | |
+| WP3 | ☐ — questions at the end of the S6 log entry; ADR-004 answers most of them in prose, so answer closed-book first | |
 | WP4 | ☐ | |
 | WP6a | ☐ — questions at the end of the S2b log entry | |
 
@@ -69,7 +69,7 @@ truly complete when both are ticked.
 | ADR-001 | H3 hex cells for adjacency, over geohash, spatial trees and raw distance | ☑ Written (WP1) |
 | ADR-002 | Incremental union-find with local rebuild on expiry | ☑ Written (WP2a) |
 | ADR-003 | Incident identity, merge and split semantics | ☑ Written (WP2b) |
-| ADR-004 | Partitioning on coarse H3 cells | ☐ Not written |
+| ADR-004 | Partitioning on coarse H3 cells, and batching the correlation consumer | ☑ Written (WP3) |
 | ADR-005 | Simulated event time: virtual clock, bounded lag, speed multiplier | ☑ Written (S2a) |
 | ADR-006 | Ground truth by construction: one severity function, two thresholds | ☑ Written (S2b) |
 | ADR-007 | A Kafka record timestamp is not application event time | ☑ Written (S2c) |
@@ -82,13 +82,15 @@ truly complete when both are ticked.
 
 | Metric | Value | Scenario / config | Source file | Date |
 |---|---|---|---|---|
-| Test coverage, correlation-engine | 100% stmts, 99.31% branches | whole src tree, `./benchmarks/run-coverage.sh`; 144 tests | `benchmarks/results/wp2b-coverage.txt` | 2026-09-18 |
-| Test coverage, `incidentLifecycle.ts` | 100% stmts, 100% branches | as above | `benchmarks/results/wp2b-coverage.txt` | 2026-09-18 |
-| Test coverage, packages/spatial | 97.89% stmts | whole src tree, `./benchmarks/run-coverage.sh` | `benchmarks/results/wp2b-coverage.txt` | 2026-09-18 |
-| Test coverage, sensor-simulator | 72.07% stmts | whole src tree; was 51.86% at WP0 | `benchmarks/results/wp2b-coverage.txt` | 2026-09-18 |
-| Test coverage, stream-processor | 37.07% stmts | whole src tree; was 38.18% — `cells.ts` left for the package | `benchmarks/results/wp2b-coverage.txt` | 2026-09-18 |
-| Test coverage, alert-processor | 46.87% stmts | whole src tree, integration suite skipped | `benchmarks/results/wp2b-coverage.txt` | 2026-09-18 |
-| Test coverage, api | 18.91% stmts | whole src tree | `benchmarks/results/wp2b-coverage.txt` | 2026-09-18 |
+| Test coverage, correlation-engine | 97.09% stmts, 96.47% branches | whole src tree, `./benchmarks/run-coverage.sh`; 267 tests. Was 100%/99.31% at WP2b over the core alone; the WP3 service layer is the part below 100% | `benchmarks/results/wp3-coverage.txt` | 2026-09-18 |
+| Test coverage, correlation-engine `src/core` | 100% stmts, 99.31% branches | as above; unchanged by WP3 — the core was not touched | `benchmarks/results/wp3-coverage.txt` | 2026-09-18 |
+| Test coverage, correlation-engine `src` (WP3 service layer) | 94.31% stmts, 94.01% branches | as above. `redisClient.ts` at 0% is a connection wrapper with no logic, as in every other service | `benchmarks/results/wp3-coverage.txt` | 2026-09-18 |
+| Test coverage, `incidentLifecycle.ts` | 100% stmts, 100% branches | as above | `benchmarks/results/wp3-coverage.txt` | 2026-09-18 |
+| Test coverage, packages/spatial | 97.89% stmts | whole src tree, `./benchmarks/run-coverage.sh` | `benchmarks/results/wp3-coverage.txt` | 2026-09-18 |
+| Test coverage, sensor-simulator | 72.07% stmts | whole src tree; was 51.86% at WP0 | `benchmarks/results/wp3-coverage.txt` | 2026-09-18 |
+| Test coverage, stream-processor | 37.07% stmts | whole src tree; was 38.18% — `cells.ts` left for the package | `benchmarks/results/wp3-coverage.txt` | 2026-09-18 |
+| Test coverage, alert-processor | 46.87% stmts | whole src tree, integration suite skipped | `benchmarks/results/wp3-coverage.txt` | 2026-09-18 |
+| Test coverage, api | 18.91% stmts | whole src tree | `benchmarks/results/wp3-coverage.txt` | 2026-09-18 |
 | Simulator event-time rate | 1.000× real time | 20 zones, `SIM_STEP_MS=1000`, `SPEED_MULTIPLIER=1` | `benchmarks/results/d8-simulator-event-clock-after.txt` | 2026-09-17 |
 | Zone-to-zone event-time divergence | 0 ms over 60 s (spread bounded at ≤ 20 ms) | as above; was 5681 ms before the fix | `benchmarks/results/d8-simulator-event-clock-after.txt` | 2026-09-17 |
 | Wall clock per 60 s confirmation window | 60.00 s at 1×, 1.00 s at 60× | as above | `benchmarks/results/d8-simulator-event-clock-after.txt` | 2026-09-17 |
@@ -153,6 +155,99 @@ Tracked from `01-ARCHITECTURE.md` §3.
 ## Session log
 
 Append one entry per working session. Newest at the top. Keep to 2–4 lines.
+
+### 2026-09-18 — S6: WP3 items 1–5 and 7 (the `correlation-engine` service)
+
+- **The core is now a service.** `services/correlation-engine/src/` around the existing
+  `src/core/`: pino logger, prom-client registry, `eachBatch` Kafka consumer, incident producer,
+  Redis incident state, zone registry, config, `.env.example`, README, ADR-004. 267 tests,
+  97.09% statements / 96.47% branches. **Items 6 (Postgres) and 8 (the `stream-processor`
+  producer change) were deliberately left for the next session**, which means WP3's end-to-end
+  acceptance criterion is not met and cannot be until item 8 lands — nothing produces to
+  `zone.degradations` yet.
+- **Not verified against a live stack.** Docker was not running on the machine. Everything here
+  is proven by tests, including against the real `NeighbourGraph`, but no message has travelled
+  through a real broker. That verification is the first thing the next session should do.
+- **`eachBatch`, and what it actually buys.** A regional fault is a burst — 62 zones in the
+  reference scenario — and `eachMessage` would fold it one zone at a time with a reconcile after
+  each: an `OPENED` plus 61 `GREW`s, every one obsoleted by the next, all published, written and
+  persisted. `eachBatch` folds the burst and reconciles once: one `OPENED` with 62 members. The
+  thing to be clear about in an interview is that **this is not a throughput optimisation**. The
+  output is better, because a lifecycle stream is read by a person and should describe the fault
+  rather than the arrival order of the messages that revealed it.
+- **And what it costs, which is the more interesting half.** `openedAt` is in the incident-id
+  preimage (ADR-003), and `openedAt` is the watermark of the reconcile that opened the incident.
+  So a coarser reconcile cadence changes *which* watermark an incident opens at, and can change
+  its seed set — a component that forms and dissolves inside one batch is never seen at all.
+  Output is byte-identical for a fixed message order **and a fixed batching** (asserted), but two
+  live runs can name the same incident differently, because batch boundaries are a broker fetch
+  artefact. Stated in the README, the class doc and ADR-004, because "why do the ids differ
+  between runs" is otherwise an alarming question with a boring answer.
+- **The non-obvious bug that `IncidentDispatcher` exists to prevent.** Offsets resolve only after
+  publish and Redis write succeed — that much is just D1's lesson. The trap is what happens on
+  the redelivery: the engine's state is in memory and every operation in the fold is idempotent,
+  so re-folding the batch produces the *same state* and therefore emits **nothing**. The events
+  from the failed attempt would vanish, with no error anywhere, and the engine would go on
+  believing it had announced an incident it never announced. At-least-once over a *stateful*
+  consumer is not the same problem as at-least-once over a stateless one. Events are therefore
+  held outside the fold until a flush succeeds.
+- **The centroid is a mean of unit vectors, not of coordinates.** Two zones at +179.9° and
+  -179.9° are 22 km apart; the componentwise mean puts their centre in the Gulf of Guinea, 20,000
+  km from both — a plausible-looking number, drawn on a map and believed. `packages/spatial`
+  already tests adjacency across the antimeridian, so an incident genuinely can straddle it.
+  Three multiplies per member, and the seam disappears because the representation has no seam.
+- **`correlation_latency_ms` is event time on both ends.** Not `Date.now() - eventTime`: the
+  simulator publishes at a fixed historical epoch, so that subtraction reports about 245 days —
+  and mixing the two clocks is the exact mistake that cost 5.76M messages in D10. It measures
+  from a zone's first degradation to the incident event that adds it, which composes with the
+  256 s detection floor WP6a already measured. Wall-clock cost has its own metric.
+- **A malformed degradation is skipped and counted, not dead-lettered.** Different call from
+  `alert-processor`'s (ADR-000), and the difference is the data: a lost alert is a lost fact, but
+  a degradation is one sample of a signal re-sampled every second, and a poison message that
+  stalls the partition costs every *other* zone's correlation while it sits there. Skipping is
+  the cheaper failure; `degradations_rejected_total` is what keeps it from being a silent one.
+- **The partition key is fixed at an incident's first event.** If it moved as the incident grew
+  across a coarse-cell boundary, that incident's own events would scatter across partitions and
+  lose their relative ordering — and a `MERGED` arriving before its `OPENED` refers to an
+  incident the consumer has never heard of. The rule is "smallest coarse cell among the founding
+  members", so it is reproducible rather than arrival-order dependent.
+- **ADR-004 written**, covering both the keying and the batching, with the alternatives that lost
+  — including the one worth naming: the two-level scheme where a local incident touching its cell
+  boundary is republished under the parent cell for a second stage to merge, which is the
+  complete answer and is deferred rather than rejected.
+- **Next:** WP3 items 6 and 8 — the Postgres migration and incident persistence, and
+  `stream-processor` emitting `ZoneDegradation` to `zone.degradations` keyed by `h3CoarseCell`
+  including recovery transitions. Then the end-to-end run against a live stack, which closes WP3.
+  Owner owes the WP0, WP6a, WP1, WP2a and WP2b understanding checkpoints.
+
+#### WP3 understanding checkpoint — questions owed
+
+The first four are the WP3 questions from `02-PHASE-1-CORRELATION.md`; the rest came out of this
+session. ADR-004 answers most of them in prose, so answer closed-book first.
+
+1. Why is correlation a separate service rather than part of `stream-processor`? Name the
+   property of the per-zone stage that would be destroyed.
+2. Why key `zone.degradations` by coarse H3 cell instead of `zoneId`? What property does that
+   buy, and what does it cost?
+3. What happens to an incident that straddles two coarse cells? How often does that happen, what
+   is the fix you would build next, and why has it not bitten yet?
+4. Why `eachBatch` over `eachMessage` *here specifically*? Give the argument that does not
+   mention throughput.
+5. Batching changes incident ids between runs. Explain the mechanism exactly — which field, why
+   it is in the preimage, and what is still guaranteed.
+6. A batch is published to Kafka, and the Redis write then fails. Walk through what happens on
+   the redelivery, and say why "the retry will re-emit them" is wrong.
+7. Why is a malformed degradation skipped rather than dead-lettered, when `alert-processor`
+   dead-letters a malformed alert? What fact about the data makes the two different?
+8. `correlation_latency_ms` could have been `Date.now() - degradation.eventTime`. Say what that
+   number would have been in this system, and what it would have meant.
+9. Why must an incident's partition key be fixed at its first event? Describe the concrete
+   failure if it moved.
+10. Why is the incident centroid computed from unit vectors? Give the two-zone example and the
+    size of the error.
+11. Why is `radiusKm` a maximum rather than a mean or a 95th percentile?
+12. Why does the incident severity roll up as a max and not a mean? What would a mean say about
+    an incident that just doubled in size?
 
 ### 2026-09-18 — S5: WP2b (correlation core — incident lifecycle)
 
