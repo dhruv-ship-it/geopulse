@@ -176,6 +176,15 @@ own spec.
 A hash rather than a UUID or a counter because it has to be **stable across replays** — same input
 stream, same IDs, which is what makes the whole thing diffable and testable.
 
+*Be precise about how far that goes, because it is a fair challenge.* `openedAt` is in the
+preimage, and `openedAt` is whatever watermark the reconcile ran at — which, with `eachBatch`, is
+set by where Kafka happened to draw the batch boundary. So output is byte-identical for a **fixed
+batching**, and I assert that. Two live runs over the same topic can draw batches differently and
+name the same incident differently. The clean fix is to reconcile on a fixed event-time grid
+instead of per batch, so `openedAt` is always a tick multiple and the ID stops depending on
+fetch behaviour at all. I know the limitation, it is in ADR-004, and I would take that fix before
+relying on cross-run diffing.
+
 My first uniqueness argument was: the preimage contains `openedAt`, components are disjoint at any
 instant, and event time is a monotonic watermark — therefore no two incidents can share a preimage.
 

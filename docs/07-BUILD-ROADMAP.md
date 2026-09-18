@@ -469,6 +469,20 @@ Carried over from WP0 (deliberately deferred to this session, do not skip):
 Then run the full stack against SCENARIO=regional-anomaly and confirm one injected regional
 anomaly produces exactly one incident. Fix what that reveals.
 
+One decision to make with live data in hand, before S8 turns any of this into numbers:
+- S6 found that incident ids depend on batching. openedAt is in the id preimage and openedAt is
+  the watermark the reconcile ran at, which with eachBatch is wherever Kafka drew the boundary.
+  Output is byte-identical for a fixed batching, but two live runs can name the same incident
+  differently - so "replay produces identical output" is currently true only with that caveat,
+  and CLAUDE.md rule 3 treats determinism as load-bearing.
+- The fix is to reconcile on a fixed event-time grid (every RECONCILE_TICK_MS of event time,
+  crossing as many ticks as the batch spans) rather than once per batch. openedAt then lands on
+  a tick multiple and the id stops depending on fetch behaviour.
+- Nothing in Phase 1 strictly needs it: the eval matches incidents by zone membership, not by id.
+  But decide it here, with real batch sizes visible, rather than after S8 and S9 have produced
+  numbers that a cadence change would invalidate. If you defer it, say so in STATUS and note that
+  the benchmark numbers are tied to the current cadence.
+
 Commit incrementally. Update docs/STATUS.md.
 ```
 
